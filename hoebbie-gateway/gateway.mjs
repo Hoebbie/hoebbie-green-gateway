@@ -1,3 +1,6 @@
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+
 const required = (name) => {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} ist nicht konfiguriert.`);
@@ -8,10 +11,27 @@ const homeAssistantUrl = required("HOME_ASSISTANT_URL").replace(/\/$/, "");
 const homeAssistantToken = required("HOME_ASSISTANT_ACCESS_TOKEN");
 const pilotEntityId = required("HOME_ASSISTANT_PILOT_ENTITY_ID");
 const gatewayUrl = required("HOEBBIE_GATEWAY_URL").replace(/\/$/, "");
-const gatewayKey = required("HOEBBIE_GATEWAY_KEY");
+const gatewayKeyPath = "/data/hoebbie_gateway_key";
+
+function gatewayKeyFromPersistentStorage() {
+  if (existsSync(gatewayKeyPath)) {
+    const existing = readFileSync(gatewayKeyPath, "utf8").trim();
+    if (existing.length >= 32) return existing;
+    throw new Error("Der gespeicherte Gateway-Schlüssel ist ungültig.");
+  }
+  const created = randomBytes(32).toString("base64url");
+  writeFileSync(gatewayKeyPath, `${created}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(gatewayKeyPath, 0o600);
+  return created;
+}
+
+const gatewayKey = gatewayKeyFromPersistentStorage();
+const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
 
 if (!/^light\.[a-z0-9_]+$/.test(pilotEntityId)) throw new Error("D2 erlaubt ausschließlich eine einzelne Licht-Entität.");
-if (!gatewayUrl.startsWith("https://") || gatewayKey.length < 32 || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
+if (!gatewayUrl.startsWith("https://") || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
+
+console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKeyDigest}`);
 
 const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Type": "application/json" };
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
