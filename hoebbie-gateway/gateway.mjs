@@ -58,7 +58,11 @@ async function runOnce() {
   if (claimed.status === 204) return;
   const command = await claimed.json().catch(() => null);
   if (claimed.ok && command === null) return;
-  if (!claimed.ok || !command || typeof command.commandId !== "string" || !["on", "off"].includes(command.action)) throw new Error("Der Serverauftrag ist ungültig.");
+  if (!claimed.ok) {
+    const detail = typeof command?.error === "string" ? command.error : `http_${claimed.status}`;
+    throw new Error(`gateway.claim_${detail}`);
+  }
+  if (!command || typeof command.commandId !== "string" || !["on", "off"].includes(command.action)) throw new Error("gateway.claim_response_invalid");
   let completion;
   try {
     const action = await request(`${homeAssistantUrl}/api/services/light/turn_${command.action}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: pilotEntityId }) });
