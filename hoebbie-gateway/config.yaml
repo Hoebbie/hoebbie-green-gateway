@@ -1,21 +1,17 @@
 name: Hoebbie Green Gateway
 slug: hoebbie_green_gateway
 description: Ausschließlich der erlaubte Hoebbie-Hue-Pilot über einen ausgehenden Green-Gateway.
-version: "0.1.4"
+version: "0.1.5"
 url: https://github.com/Hoebbie/hoebbie-green-gateway
 arch:
   - aarch64
 startup: services
 boot: auto
 init: false
-homeassistant_api: false
+homeassistant_api: true
 options:
   gateway_url: ""
-  home_assistant_url: "http://supervisor/core"
-  home_assistant_access_token: ""
   pilot_entity_id: ""
 schema:
   gateway_url: url
-  home_assistant_url: url
-  home_assistant_access_token: password
   pilot_entity_id: str

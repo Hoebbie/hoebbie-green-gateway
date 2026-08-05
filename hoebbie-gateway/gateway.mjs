@@ -75,5 +75,19 @@ async function runOnce() {
   if (!reported.ok) throw new Error("Das Ergebnis konnte nicht sicher protokolliert werden.");
 }
 
-setInterval(() => { void runOnce().catch((error) => console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler")); }, 2_000);
-void runOnce().catch((error) => console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler"));
+let polling = false;
+
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    await runOnce();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
+  } finally {
+    polling = false;
+  }
+}
+
+setInterval(() => { void poll(); }, 2_000);
+void poll();
