@@ -57,6 +57,7 @@ async function runOnce() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "claim" }) });
   if (claimed.status === 204) return;
   const command = await claimed.json().catch(() => null);
+  if (claimed.ok && command === null) return;
   if (!claimed.ok || !command || typeof command.commandId !== "string" || !["on", "off"].includes(command.action)) throw new Error("Der Serverauftrag ist ungültig.");
   let completion;
   try {
