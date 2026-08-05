@@ -9,7 +9,6 @@ const required = (name) => {
 
 const homeAssistantUrl = required("HOME_ASSISTANT_URL").replace(/\/$/, "");
 const homeAssistantToken = required("HOME_ASSISTANT_ACCESS_TOKEN");
-const pilotEntityId = required("HOME_ASSISTANT_PILOT_ENTITY_ID");
 const gatewayUrl = required("HOEBBIE_GATEWAY_URL").replace(/\/$/, "");
 const gatewayKeyPath = "/data/hoebbie_gateway_key";
 
@@ -28,7 +27,6 @@ function gatewayKeyFromPersistentStorage() {
 const gatewayKey = gatewayKeyFromPersistentStorage();
 const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
 
-if (!/^light\.[a-z0-9_]+$/.test(pilotEntityId)) throw new Error("D2 erlaubt ausschließlich eine einzelne Licht-Entität.");
 if (!gatewayUrl.startsWith("https://") || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
 
 console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKeyDigest}`);
@@ -42,6 +40,23 @@ async function request(url, options) {
   if (!response) throw new Error("Die Verbindung ist nicht erreichbar.");
   return response;
 }
+
+async function resolvePilotEntityId() {
+  const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
+  const states = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(states)) throw new Error("gateway.discovery_failed");
+
+  const matches = states.filter((state) =>
+    typeof state?.entity_id === "string" &&
+    /^light\.[a-z0-9_]+$/.test(state.entity_id) &&
+    state.attributes?.friendly_name === "Kugel",
+  );
+  if (matches.length !== 1) throw new Error("gateway.pilot_not_unique");
+  return matches[0].entity_id;
+}
+
+const pilotEntityId = await resolvePilotEntityId();
+console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
 
 async function verifiedHomeState(expected) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
