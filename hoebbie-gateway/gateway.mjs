@@ -34,6 +34,7 @@ console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKey
 const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Type": "application/json" };
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const supportedKinds = new Set(["light", "cover", "switch"]);
 
 async function request(url, options) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8_000) }).catch(() => null);
@@ -57,6 +58,35 @@ async function resolvePilotEntityId() {
 
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
+
+function discoveredEntity(state) {
+  if (typeof state?.entity_id !== "string") return null;
+  const kind = state.entity_id.split(".", 1)[0];
+  if (!supportedKinds.has(kind) || typeof state.state !== "string") return null;
+  const attributes = state.attributes && typeof state.attributes === "object" ? state.attributes : {};
+  const displayName = typeof attributes.friendly_name === "string" ? attributes.friendly_name.trim() : "";
+  if (!displayName) return null;
+  const capabilities = [];
+  if (kind === "light") {
+    capabilities.push("turn_on", "turn_off");
+    if (Array.isArray(attributes.supported_color_modes) && attributes.supported_color_modes.some((mode) => mode === "brightness" || mode === "color_temp" || mode === "xy")) capabilities.push("brightness");
+  } else if (kind === "cover") {
+    capabilities.push("open", "close");
+    if (attributes.current_position !== undefined) capabilities.push("set_position");
+  } else {
+    capabilities.push("turn_on", "turn_off");
+  }
+  return { capabilities, displayName, entityId: state.entity_id, kind, state: state.state };
+}
+
+async function reportInventory() {
+  const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
+  const states = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(states)) throw new Error("gateway.discovery_failed");
+  const entities = states.map(discoveredEntity).filter((entity) => entity !== null);
+  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ entities, mode: "inventory" }) });
+  if (!reported.ok) throw new Error("gateway.inventory_report_failed");
+}
 
 async function verifiedHomeState(expected) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -91,11 +121,16 @@ async function runOnce() {
 }
 
 let polling = false;
+let nextInventoryAt = 0;
 
 async function poll() {
   if (polling) return;
   polling = true;
   try {
+    if (Date.now() >= nextInventoryAt) {
+      await reportInventory();
+      nextInventoryAt = Date.now() + 60_000;
+    }
     await runOnce();
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
