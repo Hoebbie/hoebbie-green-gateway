@@ -64,10 +64,11 @@ async function homeAssistantAreas() {
     websocketRegistry("config/device_registry/list", 2),
     websocketRegistry("config/entity_registry/list_for_display", 3)
   ]);
-  if (!Array.isArray(areas) || !Array.isArray(devices) || !Array.isArray(entities)) throw new Error("gateway.registry_invalid");
+  const entityEntries = entities && typeof entities === "object" && Array.isArray(entities.entities) ? entities.entities : entities;
+  if (!Array.isArray(areas) || !Array.isArray(devices) || !Array.isArray(entityEntries)) throw new Error("gateway.registry_invalid");
   const names = new Map(areas.filter((area) => typeof area?.area_id === "string" && typeof area?.name === "string").map((area) => [area.area_id, area.name]));
   const deviceAreas = new Map(devices.filter((device) => typeof device?.id === "string" && typeof device?.area_id === "string").map((device) => [device.id, device.area_id]));
-  return new Map(entities.filter((entity) => typeof entity?.ei === "string").map((entity) => {
+  return new Map(entityEntries.filter((entity) => typeof entity?.ei === "string").map((entity) => {
     const areaId = typeof entity.ai === "string" ? entity.ai : deviceAreas.get(entity.di);
     return [entity.ei, typeof areaId === "string" ? names.get(areaId) ?? null : null];
   }));
