@@ -158,6 +158,30 @@ async function runOnce() {
   if (!reported.ok) throw new Error("Das Ergebnis konnte nicht sicher protokolliert werden.");
 }
 
+async function runEntityOnce() {
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
+  if (claimed.status === 204) return;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close"].includes(command.action)) throw new Error("gateway.entity_claim_failed");
+  const expected = command.action === "turn_on" ? "on" : command.action === "turn_off" ? "off" : command.action === "open" ? "open" : "closed";
+  let completion;
+  try {
+    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : "close_cover";
+    const action = await request(`${homeAssistantUrl}/api/services/${command.kind}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId }) });
+    if (!action.ok) throw new Error("gateway.action_failed");
+    let observed = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const state = await request(`${homeAssistantUrl}/api/states/${encodeURIComponent(command.entityId)}`, { headers: homeHeaders }).then((response) => response.json().catch(() => null));
+      if (state?.state === expected) { observed = expected; break; }
+      await wait(500);
+    }
+    if (!observed) throw new Error("gateway.verification_failed");
+    completion = { commandId: command.commandId, mode: "entity_complete", observedState: observed, success: true };
+  } catch (error) { completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "gateway.unexpected_error", mode: "entity_complete", success: false }; }
+  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
+  if (!reported.ok) throw new Error("gateway.entity_completion_failed");
+}
+
 let polling = false;
 let nextInventoryAt = 0;
 
@@ -170,6 +194,7 @@ async function poll() {
       nextInventoryAt = Date.now() + 60_000;
     }
     await runOnce();
+    await runEntityOnce();
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
