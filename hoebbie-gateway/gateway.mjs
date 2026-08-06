@@ -201,11 +201,16 @@ async function runEntityOnce() {
   // A Home Assistant group can change several member lamps at once. Refresh
   // their inventory immediately after the verified group command instead of
   // waiting for the regular one-minute inventory pass.
-  if (completion.success) await reportInventory();
+  if (completion.success) {
+    inventoryBurstUntil = Date.now() + 12_000;
+    nextInventoryAt = Date.now() + 500;
+    await reportInventory();
+  }
 }
 
 let polling = false;
 let nextInventoryAt = 0;
+let inventoryBurstUntil = 0;
 
 async function poll() {
   if (polling) return;
@@ -213,7 +218,7 @@ async function poll() {
   try {
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
-      nextInventoryAt = Date.now() + 60_000;
+      nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
     }
     await runOnce();
     await runEntityOnce();
