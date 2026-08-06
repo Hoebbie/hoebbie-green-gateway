@@ -35,6 +35,12 @@ const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Ty
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const supportedKinds = new Set(["light", "cover", "switch"]);
+const maintenanceSwitch = /(autoplay|gruppierung|hue bridge|sonos|loudness|lautstärke|volume|equalizer|night sound)/i;
+
+function currentPosition(attributes) {
+  const value = typeof attributes?.current_position === "number" ? attributes.current_position : Number(attributes?.current_position);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? Math.round(value) : undefined;
+}
 
 async function websocketRegistry(type, id) {
   const socketUrl = `${homeAssistantUrl.replace(/^http/, "ws")}/websocket`;
@@ -103,17 +109,20 @@ function discoveredEntity(state, areaNames) {
   const attributes = state.attributes && typeof state.attributes === "object" ? state.attributes : {};
   const displayName = typeof attributes.friendly_name === "string" ? attributes.friendly_name.trim() : "";
   if (!displayName) return null;
+  // Media and bridge-maintenance switches are not household controls. They
+  // remain available to a future explicit media/Alfred adapter, never D3 touch.
+  if (kind === "switch" && maintenanceSwitch.test(displayName)) return null;
   const capabilities = [];
   if (kind === "light") {
     capabilities.push("turn_on", "turn_off");
     if (Array.isArray(attributes.supported_color_modes) && attributes.supported_color_modes.some((mode) => mode === "brightness" || mode === "color_temp" || mode === "xy")) capabilities.push("brightness");
   } else if (kind === "cover") {
-    capabilities.push("open", "close");
-    if (attributes.current_position !== undefined) capabilities.push("set_position");
+    capabilities.push("open", "close", "stop");
+    if (currentPosition(attributes) !== undefined) capabilities.push("set_position");
   } else {
     capabilities.push("turn_on", "turn_off");
   }
-  return { areaName: areaNames.get(state.entity_id) ?? null, capabilities, displayName, entityId: state.entity_id, kind, state: state.state };
+  return { areaName: areaNames.get(state.entity_id) ?? null, capabilities, displayName, entityId: state.entity_id, kind, position: currentPosition(attributes), state: state.state };
 }
 
 async function reportInventory() {
@@ -162,21 +171,28 @@ async function runEntityOnce() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
   if (claimed.status === 204) return;
   const command = await claimed.json().catch(() => null);
-  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close"].includes(command.action)) throw new Error("gateway.entity_claim_failed");
-  const expected = command.action === "turn_on" ? "on" : command.action === "turn_off" ? "off" : command.action === "open" ? "open" : "closed";
+  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position"].includes(command.action)) throw new Error("gateway.entity_claim_invalid");
   let completion;
   try {
-    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : "close_cover";
-    const action = await request(`${homeAssistantUrl}/api/services/${command.kind}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId }) });
+    if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new Error("gateway.entity_action_invalid");
+    if (command.action === "set_position" && (!Number.isInteger(command.targetPosition) || command.targetPosition < 0 || command.targetPosition > 100)) throw new Error("gateway.entity_position_invalid");
+    const domain = ["turn_on", "turn_off"].includes(command.action) ? command.kind : "cover";
+    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : "set_cover_position";
+    const action = await request(`${homeAssistantUrl}/api/services/${domain}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}) }) });
     if (!action.ok) throw new Error("gateway.action_failed");
-    let observed = null;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const state = await request(`${homeAssistantUrl}/api/states/${encodeURIComponent(command.entityId)}`, { headers: homeHeaders }).then((response) => response.json().catch(() => null));
-      if (state?.state === expected) { observed = expected; break; }
+    let state;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const response = await request(`${homeAssistantUrl}/api/states/${encodeURIComponent(command.entityId)}`, { headers: homeHeaders });
+      state = await response.json().catch(() => null);
+      if (!response.ok || state?.entity_id !== command.entityId || typeof state.state !== "string") throw new Error("gateway.state_unavailable");
+      const position = currentPosition(state.attributes);
+      const verified = command.action === "set_position" ? position !== undefined && Math.abs(position - command.targetPosition) <= 2 : command.action === "stop" ? !["opening", "closing"].includes(state.state) : command.action === "open" ? state.state === "open" : command.action === "close" ? state.state === "closed" : state.state === (command.action === "turn_on" ? "on" : "off");
+      if (verified) break;
+      state = null;
       await wait(500);
     }
-    if (!observed) throw new Error("gateway.verification_failed");
-    completion = { commandId: command.commandId, mode: "entity_complete", observedState: observed, success: true };
+    if (!state) throw new Error("gateway.verification_failed");
+    completion = { commandId: command.commandId, mode: "entity_complete", observedPosition: currentPosition(state.attributes), observedState: state.state, success: true };
   } catch (error) { completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "gateway.unexpected_error", mode: "entity_complete", success: false }; }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.entity_completion_failed");
