@@ -219,5 +219,7 @@ async function poll() {
   }
 }
 
-setInterval(() => { void poll(); }, 2_000);
+// Commands are claimed at sub-second cadence; inventory itself remains limited
+// to once per minute inside poll().
+setInterval(() => { void poll(); }, 500);
 void poll();
