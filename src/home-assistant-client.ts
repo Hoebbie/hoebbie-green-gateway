@@ -1,4 +1,6 @@
 export type PilotLightAction = "on" | "off";
+export type ActiveEntityAction = "turn_on" | "turn_off" | "open" | "close" | "stop" | "set_position";
+export type ActiveEntityKind = "light" | "cover" | "switch";
 
 export interface HomeAssistantState {
   entity_id: string;
@@ -27,6 +29,7 @@ export class HomeAssistantGatewayError extends Error {
 }
 
 const pilotEntityPattern = /^light\.[a-z0-9_]+$/;
+const activeEntityPattern = /^(light|cover|switch)\.[a-z0-9_]+$/;
 
 function normalizedUrl(value: string): URL {
   let parsed: URL;
@@ -98,5 +101,37 @@ export class HomeAssistantPilotClient {
       await sleep(500);
     }
     throw new HomeAssistantGatewayError("gateway.verification_failed", "Das Pilotlicht hat den erwarteten Zustand nicht bestätigt.");
+  }
+}
+
+/** Executes only a command already validated and claimed by the Hoebbie server. */
+export class HomeAssistantEntityClient {
+  constructor(private readonly config: Pick<HomeAssistantGatewayConfig, "accessToken" | "baseUrl">, private readonly fetcher: FetchLike = fetch) {
+    validateGatewayConfig({ ...config, pilotEntityId: "light.validation" });
+  }
+
+  async setAndVerify(command: { action: ActiveEntityAction; entityId: string; kind: ActiveEntityKind; targetPosition?: number }, sleep: Sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))): Promise<HomeAssistantState> {
+    if (!activeEntityPattern.test(command.entityId) || !["light", "cover", "switch"].includes(command.kind) || command.entityId.split(".")[0] !== command.kind) throw new HomeAssistantGatewayError("gateway.invalid_entity", "Der freigegebene Auftrag ist ungültig.");
+    if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new HomeAssistantGatewayError("gateway.invalid_action", "Diese Aktion ist nur für Jalousien erlaubt.");
+    if (command.action === "set_position" && (!Number.isInteger(command.targetPosition) || command.targetPosition! < 0 || command.targetPosition! > 100)) throw new HomeAssistantGatewayError("gateway.invalid_position", "Die Jalousieposition ist ungültig.");
+    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : "set_cover_position";
+    const domain = command.action === "turn_on" || command.action === "turn_off" ? command.kind : "cover";
+    const response = await this.fetcher(`${this.config.baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`, { method: "POST", headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}) }), signal: AbortSignal.timeout(5_000) }).catch(() => null);
+    if (!response?.ok) throw new HomeAssistantGatewayError("gateway.action_failed", "Home Assistant hat den Auftrag nicht ausgeführt.");
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const state = await this.read(command.entityId);
+      const position = typeof state.attributes.current_position === "number" ? Math.round(state.attributes.current_position) : null;
+      const complete = command.action === "set_position" ? position === command.targetPosition : command.action === "stop" ? state.state !== "opening" && state.state !== "closing" : command.action === "open" ? state.state === "open" : command.action === "close" ? state.state === "closed" : state.state === (command.action === "turn_on" ? "on" : "off");
+      if (complete) return state;
+      await sleep(500);
+    }
+    throw new HomeAssistantGatewayError("gateway.verification_failed", "Der neue Gerätezustand wurde nicht bestätigt.");
+  }
+
+  private async read(entityId: string): Promise<HomeAssistantState> {
+    const response = await this.fetcher(`${this.config.baseUrl.replace(/\/$/, "")}/api/states/${encodeURIComponent(entityId)}`, { headers: { Authorization: `Bearer ${this.config.accessToken}` }, signal: AbortSignal.timeout(5_000) }).catch(() => null);
+    const state = response ? await response.json().catch(() => null) as HomeAssistantState | null : null;
+    if (!response?.ok || !state || state.entity_id !== entityId) throw new HomeAssistantGatewayError("gateway.state_unavailable", "Der Gerätestatus konnte nicht gelesen werden.");
+    return state;
   }
 }

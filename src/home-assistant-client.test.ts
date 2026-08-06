@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HomeAssistantEntityClient,
   HomeAssistantGatewayError,
   HomeAssistantPilotClient,
   validateGatewayConfig
@@ -38,9 +39,21 @@ describe("HomeAssistantPilotClient", () => {
     });
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response("[]", { status: 200 }))
-      .mockResolvedValue(new Response(state, { status: 200 }));
+      .mockImplementation(() => Promise.resolve(new Response(state, { status: 200 })));
     const client = new HomeAssistantPilotClient(config, fetcher);
 
     await expect(client.setAndVerify("on", async () => undefined)).rejects.toMatchObject({ code: "gateway.verification_failed" });
+  });
+});
+
+describe("HomeAssistantEntityClient", () => {
+  it("uses the cover position service and only accepts the read-back position", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response("[]", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ attributes: { current_position: 50 }, entity_id: "cover.terrasse", last_changed: "2026-08-06T12:00:00Z", last_updated: "2026-08-06T12:00:00Z", state: "open" }), { status: 200 }));
+    const client = new HomeAssistantEntityClient(config, fetcher);
+    await expect(client.setAndVerify({ action: "set_position", entityId: "cover.terrasse", kind: "cover", targetPosition: 50 }, async () => undefined)).resolves.toMatchObject({ state: "open" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://homeassistant.local:8123/api/services/cover/set_cover_position");
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ entity_id: "cover.terrasse", position: 50 });
   });
 });
