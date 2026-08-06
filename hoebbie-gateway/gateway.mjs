@@ -198,6 +198,10 @@ async function runEntityOnce() {
   } catch (error) { completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "gateway.unexpected_error", mode: "entity_complete", success: false }; }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.entity_completion_failed");
+  // A Home Assistant group can change several member lamps at once. Refresh
+  // their inventory immediately after the verified group command instead of
+  // waiting for the regular one-minute inventory pass.
+  if (completion.success) await reportInventory();
 }
 
 let polling = false;
