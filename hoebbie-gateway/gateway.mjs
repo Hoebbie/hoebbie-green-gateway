@@ -36,6 +36,7 @@ const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const supportedKinds = new Set(["light", "cover", "switch"]);
 const maintenanceSwitch = /(autoplay|gruppierung|hue bridge|sonos|loudness|lautstärke|volume|equalizer|night sound)/i;
+const nonHouseholdEntity = /^(bürostrahler|ess?zimmer überblenden|küche überblenden|erdgeschoss|flur sensor aktiviert|flur lichtsensor aktiviert|wohnzimmer nachtton|wohnzimmer sprachverbesserung|wohnzimmer surround aktiviert|wohnzimmer überblenden)$/i;
 
 function currentPosition(attributes) {
   const value = typeof attributes?.current_position === "number" ? attributes.current_position : Number(attributes?.current_position);
@@ -112,7 +113,7 @@ function discoveredEntity(state, areaNames) {
   if (!displayName) return null;
   // Media and bridge-maintenance switches are not household controls. They
   // remain available to a future explicit media/Alfred adapter, never D3 touch.
-  if (kind === "switch" && maintenanceSwitch.test(displayName)) return null;
+  if (nonHouseholdEntity.test(displayName) || (kind === "switch" && maintenanceSwitch.test(displayName))) return null;
   const capabilities = [];
   if (kind === "light") {
     capabilities.push("turn_on", "turn_off");
