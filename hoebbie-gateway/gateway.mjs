@@ -36,6 +36,43 @@ const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const supportedKinds = new Set(["light", "cover", "switch"]);
 
+async function websocketRegistry(type, id) {
+  const socketUrl = `${homeAssistantUrl.replace(/^http/, "ws")}/websocket`;
+  const socket = new WebSocket(socketUrl);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { socket.close(); reject(new Error("gateway.registry_timeout")); }, 8_000);
+    const fail = (error) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error("gateway.registry_failed")); };
+    socket.addEventListener("error", () => fail(new Error("gateway.registry_failed")), { once: true });
+    socket.addEventListener("message", (event) => {
+      let message;
+      try { message = JSON.parse(String(event.data)); } catch { fail(new Error("gateway.registry_invalid")); return; }
+      if (message.type === "auth_required") { socket.send(JSON.stringify({ type: "auth", access_token: homeAssistantToken })); return; }
+      if (message.type === "auth_invalid") { fail(new Error("gateway.registry_unauthorized")); return; }
+      if (message.type === "auth_ok") { socket.send(JSON.stringify({ id, type })); return; }
+      if (message.type === "result" && message.id === id) {
+        clearTimeout(timer); socket.close();
+        if (message.success !== true) { reject(new Error("gateway.registry_rejected")); return; }
+        resolve(message.result);
+      }
+    });
+  });
+}
+
+async function homeAssistantAreas() {
+  const [areas, devices, entities] = await Promise.all([
+    websocketRegistry("config/area_registry/list", 1),
+    websocketRegistry("config/device_registry/list", 2),
+    websocketRegistry("config/entity_registry/list_for_display", 3)
+  ]);
+  if (!Array.isArray(areas) || !Array.isArray(devices) || !Array.isArray(entities)) throw new Error("gateway.registry_invalid");
+  const names = new Map(areas.filter((area) => typeof area?.area_id === "string" && typeof area?.name === "string").map((area) => [area.area_id, area.name]));
+  const deviceAreas = new Map(devices.filter((device) => typeof device?.id === "string" && typeof device?.area_id === "string").map((device) => [device.id, device.area_id]));
+  return new Map(entities.filter((entity) => typeof entity?.ei === "string").map((entity) => {
+    const areaId = typeof entity.ai === "string" ? entity.ai : deviceAreas.get(entity.di);
+    return [entity.ei, typeof areaId === "string" ? names.get(areaId) ?? null : null];
+  }));
+}
+
 async function request(url, options) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8_000) }).catch(() => null);
   if (!response) throw new Error("Die Verbindung ist nicht erreichbar.");
@@ -59,7 +96,7 @@ async function resolvePilotEntityId() {
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
 
-function discoveredEntity(state) {
+function discoveredEntity(state, areaNames) {
   if (typeof state?.entity_id !== "string") return null;
   const kind = state.entity_id.split(".", 1)[0];
   if (!supportedKinds.has(kind) || typeof state.state !== "string") return null;
@@ -76,14 +113,15 @@ function discoveredEntity(state) {
   } else {
     capabilities.push("turn_on", "turn_off");
   }
-  return { capabilities, displayName, entityId: state.entity_id, kind, state: state.state };
+  return { areaName: areaNames.get(state.entity_id) ?? null, capabilities, displayName, entityId: state.entity_id, kind, state: state.state };
 }
 
 async function reportInventory() {
   const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
   const states = await response.json().catch(() => null);
   if (!response.ok || !Array.isArray(states)) throw new Error("gateway.discovery_failed");
-  const entities = states.map(discoveredEntity).filter((entity) => entity !== null);
+  const areaNames = await homeAssistantAreas();
+  const entities = states.map((state) => discoveredEntity(state, areaNames)).filter((entity) => entity !== null);
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ entities, mode: "inventory" }) });
   if (!reported.ok) throw new Error("gateway.inventory_report_failed");
 }

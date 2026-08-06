@@ -1,7 +1,7 @@
 name: Hoebbie Green Gateway
 slug: hoebbie_green_gateway
-description: Ausschließlich der erlaubte Hoebbie-Hue-Pilot über einen ausgehenden Green-Gateway.
-version: "0.1.8"
+description: Hoebbie-Geräteinventar und erlaubte Steuerung über einen ausgehenden Green-Gateway.
+version: "0.1.9"
 url: https://github.com/Hoebbie/hoebbie-green-gateway
 arch:
   - aarch64
@@ -9,8 +9,8 @@ startup: services
 boot: auto
 init: false
 homeassistant_api: true
-# D2 has a deliberately fixed, server-side allowlisted pilot.  There are no
-# user-entered endpoint, token, or entity-ID fields: the add-on discovers the
-# selected Hue light locally and the Green only ever uses the Supervisor token.
+# Es gibt keine user-entered endpoint, token, oder entity-ID Felder. Der Green
+# nutzt ausschließlich das Supervisor-Token und meldet Räume über die lokale
+# Home-Assistant-Registry.
 options: {}
 schema: {}
