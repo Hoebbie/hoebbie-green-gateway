@@ -14,6 +14,11 @@ test("only confirms a warm-white routine target after brightness and color read-
   assert.equal(lightTargetMatches({ attributes: { brightness: 179, color_temp_kelvin: 4000 }, state: "on" }, command), false);
 });
 
+test("confirms a brightness-only target without requiring an unsupported color state", () => {
+  const command = { targetBrightness: 70 };
+  assert.equal(lightTargetMatches({ attributes: { brightness: 179 }, state: "on" }, command), true);
+});
+
 test("only confirms the orange night light after its RGB target read-back", () => {
   const command = { targetBrightness: 10, targetRgbColor: [255, 100, 0] };
   assert.equal(lightTargetMatches({ attributes: { brightness: 26, rgb_color: [255, 100, 0] }, state: "on" }, command), true);

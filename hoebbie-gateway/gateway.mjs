@@ -118,7 +118,10 @@ function discoveredEntity(state, areaNames) {
   const capabilities = [];
   if (kind === "light") {
     capabilities.push("turn_on", "turn_off");
-    if (Array.isArray(attributes.supported_color_modes) && attributes.supported_color_modes.some((mode) => mode === "brightness" || mode === "color_temp" || mode === "xy")) capabilities.push("brightness");
+    const colorModes = Array.isArray(attributes.supported_color_modes) ? attributes.supported_color_modes : [];
+    if (colorModes.some((mode) => mode === "brightness" || mode === "color_temp" || mode === "hs" || mode === "xy" || mode === "rgb" || mode === "rgbw" || mode === "rgbww")) capabilities.push("brightness");
+    if (colorModes.includes("color_temp")) capabilities.push("set_color_temperature");
+    if (colorModes.some((mode) => mode === "hs" || mode === "xy" || mode === "rgb" || mode === "rgbw" || mode === "rgbww")) capabilities.push("set_rgb");
   } else if (kind === "cover") {
     capabilities.push("open", "close", "stop");
     if (currentPosition(attributes) !== undefined) capabilities.push("set_position");
@@ -190,10 +193,10 @@ async function runEntityOnce() {
   try {
     if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new Error("gateway.entity_action_invalid");
     if (command.action === "set_position" && !percentage(command.targetPosition)) throw new Error("gateway.entity_position_invalid");
-    if (command.action === "set_light" && (command.kind !== "light" || !percentage(command.targetBrightness) || (!colorTemperature(command.targetColorTemperature) && !rgbColor(command.targetRgbColor)))) throw new Error("gateway.entity_light_target_invalid");
+    if (command.action === "set_light" && (command.kind !== "light" || !percentage(command.targetBrightness))) throw new Error("gateway.entity_light_target_invalid");
     const domain = ["turn_on", "turn_off", "set_light"].includes(command.action) ? command.kind : "cover";
     const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : command.action === "set_position" ? "set_cover_position" : "turn_on";
-    const action = await request(`${homeAssistantUrl}/api/services/${domain}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}), ...(command.action === "set_light" ? { brightness_pct: command.targetBrightness, ...(colorTemperature(command.targetColorTemperature) ? { color_temp_kelvin: command.targetColorTemperature } : { rgb_color: command.targetRgbColor }) } : {}) }) });
+    const action = await request(`${homeAssistantUrl}/api/services/${domain}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}), ...(command.action === "set_light" ? { brightness_pct: command.targetBrightness, ...(colorTemperature(command.targetColorTemperature) ? { color_temp_kelvin: command.targetColorTemperature } : rgbColor(command.targetRgbColor) ? { rgb_color: command.targetRgbColor } : {}) } : {}) }) });
     if (!action.ok) throw new Error("gateway.action_failed");
     let state;
     for (let attempt = 0; attempt < 8; attempt += 1) {

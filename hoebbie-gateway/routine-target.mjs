@@ -37,6 +37,7 @@ export function lightTargetMatches(state, command) {
     const temperature = currentColorTemperature(state.attributes);
     return temperature !== undefined && Math.abs(temperature - command.targetColorTemperature) <= 250;
   }
+  if (!rgbColor(command.targetRgbColor)) return true;
   const rgb = currentRgbColor(state.attributes);
   return Boolean(rgb && rgbColor(command.targetRgbColor) && rgb.every((component, index) => Math.abs(component - command.targetRgbColor[index]) <= 12));
 }
