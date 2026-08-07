@@ -8,6 +8,7 @@ LABEL \
   io.hass.version="${BUILD_VERSION}"
 RUN apk add --no-cache nodejs
 COPY gateway.mjs /app/gateway.mjs
+COPY routine-target.mjs /app/routine-target.mjs
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 CMD ["/run.sh"]

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -124,7 +125,18 @@ function discoveredEntity(state, areaNames) {
   } else {
     capabilities.push("turn_on", "turn_off");
   }
-  return { areaName: areaNames.get(state.entity_id) ?? null, capabilities, displayName, entityId: state.entity_id, kind, position: currentPosition(attributes), state: state.state };
+  return {
+    areaName: areaNames.get(state.entity_id) ?? null,
+    brightness: currentBrightness(attributes),
+    capabilities,
+    colorTemperature: currentColorTemperature(attributes),
+    displayName,
+    entityId: state.entity_id,
+    kind,
+    position: currentPosition(attributes),
+    rgbColor: currentRgbColor(attributes),
+    state: state.state
+  };
 }
 
 async function reportInventory() {
@@ -173,14 +185,15 @@ async function runEntityOnce() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
   if (claimed.status === 204) return;
   const command = await claimed.json().catch(() => null);
-  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position"].includes(command.action)) throw new Error("gateway.entity_claim_invalid");
+  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(command.action)) throw new Error("gateway.entity_claim_invalid");
   let completion;
   try {
     if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new Error("gateway.entity_action_invalid");
-    if (command.action === "set_position" && (!Number.isInteger(command.targetPosition) || command.targetPosition < 0 || command.targetPosition > 100)) throw new Error("gateway.entity_position_invalid");
-    const domain = ["turn_on", "turn_off"].includes(command.action) ? command.kind : "cover";
-    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : "set_cover_position";
-    const action = await request(`${homeAssistantUrl}/api/services/${domain}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}) }) });
+    if (command.action === "set_position" && !percentage(command.targetPosition)) throw new Error("gateway.entity_position_invalid");
+    if (command.action === "set_light" && (command.kind !== "light" || !percentage(command.targetBrightness) || (!colorTemperature(command.targetColorTemperature) && !rgbColor(command.targetRgbColor)))) throw new Error("gateway.entity_light_target_invalid");
+    const domain = ["turn_on", "turn_off", "set_light"].includes(command.action) ? command.kind : "cover";
+    const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : command.action === "set_position" ? "set_cover_position" : "turn_on";
+    const action = await request(`${homeAssistantUrl}/api/services/${domain}/${service}`, { method: "POST", headers: homeHeaders, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}), ...(command.action === "set_light" ? { brightness_pct: command.targetBrightness, ...(colorTemperature(command.targetColorTemperature) ? { color_temp_kelvin: command.targetColorTemperature } : { rgb_color: command.targetRgbColor }) } : {}) }) });
     if (!action.ok) throw new Error("gateway.action_failed");
     let state;
     for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -188,13 +201,22 @@ async function runEntityOnce() {
       state = await response.json().catch(() => null);
       if (!response.ok || state?.entity_id !== command.entityId || typeof state.state !== "string") throw new Error("gateway.state_unavailable");
       const position = currentPosition(state.attributes);
-      const verified = command.action === "set_position" ? position !== undefined && Math.abs(position - command.targetPosition) <= 2 : command.action === "stop" ? !["opening", "closing"].includes(state.state) : command.action === "open" ? state.state === "open" : command.action === "close" ? state.state === "closed" : state.state === (command.action === "turn_on" ? "on" : "off");
+      const verified = command.action === "set_position" ? position !== undefined && Math.abs(position - command.targetPosition) <= 2 : command.action === "set_light" ? lightTargetMatches(state, command) : command.action === "stop" ? !["opening", "closing"].includes(state.state) : command.action === "open" ? state.state === "open" : command.action === "close" ? state.state === "closed" : state.state === (command.action === "turn_on" ? "on" : "off");
       if (verified) break;
       state = null;
       await wait(500);
     }
     if (!state) throw new Error("gateway.verification_failed");
-    completion = { commandId: command.commandId, mode: "entity_complete", observedPosition: currentPosition(state.attributes), observedState: state.state, success: true };
+    completion = {
+      commandId: command.commandId,
+      mode: "entity_complete",
+      observedBrightness: currentBrightness(state.attributes),
+      observedColorTemperature: currentColorTemperature(state.attributes),
+      observedPosition: currentPosition(state.attributes),
+      observedRgbColor: currentRgbColor(state.attributes),
+      observedState: state.state,
+      success: true
+    };
   } catch (error) { completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "gateway.unexpected_error", mode: "entity_complete", success: false }; }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.entity_completion_failed");
