@@ -184,11 +184,11 @@ async function runOnce() {
   if (!reported.ok) throw new Error("Das Ergebnis konnte nicht sicher protokolliert werden.");
 }
 
-async function runEntityOnce() {
-  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
-  if (claimed.status === 204) return;
-  const command = await claimed.json().catch(() => null);
-  if (!claimed.ok || !command || typeof command.commandId !== "string" || typeof command.entityId !== "string" || !["light", "cover", "switch"].includes(command.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(command.action)) throw new Error("gateway.entity_claim_invalid");
+function validEntityCommand(command) {
+  return Boolean(command && typeof command.commandId === "string" && typeof command.entityId === "string" && ["light", "cover", "switch"].includes(command.kind) && ["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(command.action));
+}
+
+async function executeEntityCommand(command) {
   let completion;
   try {
     if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new Error("gateway.entity_action_invalid");
@@ -221,16 +221,44 @@ async function runEntityOnce() {
       success: true
     };
   } catch (error) { completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "gateway.unexpected_error", mode: "entity_complete", success: false }; }
+  return completion;
+}
+
+async function reportEntityCompletion(completion) {
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.entity_completion_failed");
+}
+
+async function refreshAfterEntitySuccess(successful) {
   // A Home Assistant group can change several member lamps at once. Refresh
-  // their inventory immediately after the verified group command instead of
+  // their inventory once after direct or parallel routine commands instead of
   // waiting for the regular one-minute inventory pass.
-  if (completion.success) {
+  if (successful) {
     inventoryBurstUntil = Date.now() + 12_000;
     nextInventoryAt = Date.now() + 500;
     await reportInventory();
   }
+}
+
+async function runEntityRoutineBatch() {
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim_batch" }) });
+  if (claimed.status === 204) return;
+  const response = await claimed.json().catch(() => null);
+  const commands = response?.commands;
+  if (!claimed.ok || !Array.isArray(commands) || commands.length === 0 || commands.some((command) => !validEntityCommand(command))) throw new Error("gateway.entity_claim_batch_invalid");
+  const completions = await Promise.all(commands.map((command) => executeEntityCommand(command)));
+  await Promise.all(completions.map((completion) => reportEntityCompletion(completion)));
+  await refreshAfterEntitySuccess(completions.some((completion) => completion.success));
+}
+
+async function runEntityOnce() {
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
+  if (claimed.status === 204) return;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validEntityCommand(command)) throw new Error("gateway.entity_claim_invalid");
+  const completion = await executeEntityCommand(command);
+  await reportEntityCompletion(completion);
+  await refreshAfterEntitySuccess(completion.success);
 }
 
 let polling = false;
@@ -241,12 +269,15 @@ async function poll() {
   if (polling) return;
   polling = true;
   try {
+    // Touch routines take priority over a periodic inventory refresh so the
+    // wall action reaches Home Assistant without waiting for registry reads.
+    await runOnce();
+    await runEntityRoutineBatch();
+    await runEntityOnce();
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
     }
-    await runOnce();
-    await runEntityOnce();
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
