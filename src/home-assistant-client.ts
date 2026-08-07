@@ -114,10 +114,10 @@ export class HomeAssistantEntityClient {
     if (!activeEntityPattern.test(command.entityId) || !["light", "cover", "switch"].includes(command.kind) || command.entityId.split(".")[0] !== command.kind) throw new HomeAssistantGatewayError("gateway.invalid_entity", "Der freigegebene Auftrag ist ungültig.");
     if ((command.action === "stop" || command.action === "set_position") && command.kind !== "cover") throw new HomeAssistantGatewayError("gateway.invalid_action", "Diese Aktion ist nur für Jalousien erlaubt.");
     if (command.action === "set_position" && (!Number.isInteger(command.targetPosition) || command.targetPosition! < 0 || command.targetPosition! > 100)) throw new HomeAssistantGatewayError("gateway.invalid_position", "Die Jalousieposition ist ungültig.");
-    if (command.action === "set_light" && (command.kind !== "light" || !Number.isInteger(command.targetBrightness) || command.targetBrightness! < 0 || command.targetBrightness! > 100 || (!Number.isInteger(command.targetColorTemperature) && !isRgbColor(command.targetRgbColor)))) throw new HomeAssistantGatewayError("gateway.invalid_light_target", "Das Lichtziel ist ungültig.");
+    if (command.action === "set_light" && (command.kind !== "light" || !Number.isInteger(command.targetBrightness) || command.targetBrightness! < 0 || command.targetBrightness! > 100)) throw new HomeAssistantGatewayError("gateway.invalid_light_target", "Das Lichtziel ist ungültig.");
     const service = command.action === "turn_on" ? "turn_on" : command.action === "turn_off" ? "turn_off" : command.action === "open" ? "open_cover" : command.action === "close" ? "close_cover" : command.action === "stop" ? "stop_cover" : command.action === "set_position" ? "set_cover_position" : "turn_on";
     const domain = command.action === "turn_on" || command.action === "turn_off" || command.action === "set_light" ? command.kind : "cover";
-    const response = await this.fetcher(`${this.config.baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`, { method: "POST", headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}), ...(command.action === "set_light" ? { brightness_pct: command.targetBrightness, ...(Number.isInteger(command.targetColorTemperature) ? { color_temp_kelvin: command.targetColorTemperature } : { rgb_color: command.targetRgbColor }) } : {}) }), signal: AbortSignal.timeout(5_000) }).catch(() => null);
+    const response = await this.fetcher(`${this.config.baseUrl.replace(/\/$/, "")}/api/services/${domain}/${service}`, { method: "POST", headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ entity_id: command.entityId, ...(command.action === "set_position" ? { position: command.targetPosition } : {}), ...(command.action === "set_light" ? { brightness_pct: command.targetBrightness, ...(Number.isInteger(command.targetColorTemperature) ? { color_temp_kelvin: command.targetColorTemperature } : isRgbColor(command.targetRgbColor) ? { rgb_color: command.targetRgbColor } : {}) } : {}) }), signal: AbortSignal.timeout(5_000) }).catch(() => null);
     if (!response?.ok) throw new HomeAssistantGatewayError("gateway.action_failed", "Home Assistant hat den Auftrag nicht ausgeführt.");
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const state = await this.read(command.entityId);
@@ -167,6 +167,7 @@ function lightTargetMatches(state: HomeAssistantState, command: { targetBrightne
     const temperature = currentColorTemperatureKelvin(state);
     return temperature !== null && Math.abs(temperature - command.targetColorTemperature!) <= 250;
   }
+  if (!command.targetRgbColor) return true;
   const rgb = currentRgbColor(state);
   const targetRgbColor = command.targetRgbColor;
   return Boolean(rgb && targetRgbColor && rgb.every((component, index) => Math.abs(component - targetRgbColor[index]!) <= 12));

@@ -102,7 +102,7 @@ export class HttpGatewayCommandApi implements GatewayCommandApi {
     const response = await this.request({ mode: "entity_claim" });
     if (response.status === 204) return null;
     const data = await response.json().catch(() => null) as ActiveEntityCommand | null;
-    if (!response.ok || !data || typeof data.commandId !== "string" || typeof data.entityId !== "string" || !["light", "cover", "switch"].includes(data.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(data.action) || (data.action === "set_position" && !percentage(data.targetPosition)) || (data.action === "set_light" && (!percentage(data.targetBrightness) || (!colorTemperature(data.targetColorTemperature) && !rgb(data.targetRgbColor))))) throw new Error("Der Green-Gateway konnte keinen gültigen Geräteauftrag abrufen.");
+    if (!response.ok || !data || typeof data.commandId !== "string" || typeof data.entityId !== "string" || !["light", "cover", "switch"].includes(data.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(data.action) || (data.action === "set_position" && !percentage(data.targetPosition)) || (data.action === "set_light" && !percentage(data.targetBrightness))) throw new Error("Der Green-Gateway konnte keinen gültigen Geräteauftrag abrufen.");
     return data;
   }
 
@@ -127,10 +127,6 @@ function brightnessPercent(value: unknown): number | undefined {
 
 function percentage(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
-}
-
-function colorTemperature(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1000 && value <= 10000;
 }
 
 function colorTemperatureKelvin(attributes: Record<string, unknown>): number | undefined {
