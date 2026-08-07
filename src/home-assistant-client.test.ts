@@ -56,4 +56,21 @@ describe("HomeAssistantEntityClient", () => {
     expect(fetcher.mock.calls[0]?.[0]).toBe("http://homeassistant.local:8123/api/services/cover/set_cover_position");
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ entity_id: "cover.terrasse", position: 50 });
   });
+
+  it("sets and verifies a warm-white target before reporting routine success", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response("[]", { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ attributes: { brightness: 179, color_temp_kelvin: 2700 }, entity_id: "light.sessel", last_changed: "2026-08-07T11:00:00Z", last_updated: "2026-08-07T11:00:00Z", state: "on" }), { status: 200 }));
+    const client = new HomeAssistantEntityClient(config, fetcher);
+    await expect(client.setAndVerify({ action: "set_light", entityId: "light.sessel", kind: "light", targetBrightness: 70, targetColorTemperature: 2700 }, async () => undefined)).resolves.toMatchObject({ state: "on" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://homeassistant.local:8123/api/services/light/turn_on");
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ brightness_pct: 70, color_temp_kelvin: 2700, entity_id: "light.sessel" });
+  });
+
+  it("rejects a light target when the returned brightness differs", async () => {
+    const state = JSON.stringify({ attributes: { brightness: 80, color_temp_kelvin: 2700 }, entity_id: "light.sessel", last_changed: "2026-08-07T11:00:00Z", last_updated: "2026-08-07T11:00:00Z", state: "on" });
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response("[]", { status: 200 })).mockImplementation(() => Promise.resolve(new Response(state, { status: 200 })));
+    const client = new HomeAssistantEntityClient(config, fetcher);
+    await expect(client.setAndVerify({ action: "set_light", entityId: "light.sessel", kind: "light", targetBrightness: 70, targetColorTemperature: 2700 }, async () => undefined)).rejects.toMatchObject({ code: "gateway.verification_failed" });
+  });
 });

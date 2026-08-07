@@ -16,8 +16,8 @@ export interface GatewayCommandApi {
   complete(input: { commandId: string; errorCode?: string; observedState?: string; success: boolean }): Promise<void>;
 }
 
-export interface ActiveEntityCommand { action: "turn_on" | "turn_off" | "open" | "close" | "stop" | "set_position"; commandId: string; entityId: string; kind: "light" | "cover" | "switch"; targetPosition?: number; }
-export interface ActiveEntityCommandApi { claimEntity(): Promise<ActiveEntityCommand | null>; completeEntity(input: { commandId: string; errorCode?: string; observedPosition?: number; observedState?: string; success: boolean }): Promise<void>; }
+export interface ActiveEntityCommand { action: "turn_on" | "turn_off" | "open" | "close" | "stop" | "set_position" | "set_light"; commandId: string; entityId: string; kind: "light" | "cover" | "switch"; targetBrightness?: number; targetColorTemperature?: number; targetPosition?: number; targetRgbColor?: readonly [number, number, number]; }
+export interface ActiveEntityCommandApi { claimEntity(): Promise<ActiveEntityCommand | null>; completeEntity(input: { commandId: string; errorCode?: string; observedBrightness?: number; observedColorTemperature?: number; observedPosition?: number; observedRgbColor?: readonly [number, number, number]; observedState?: string; success: boolean }): Promise<void>; }
 
 export class HomeAssistantGatewayRunner {
   constructor(
@@ -52,7 +52,10 @@ export class HomeAssistantEntityRunner {
     try {
       const state = await this.homeAssistant.setAndVerify(command);
       const position = typeof state.attributes.current_position === "number" ? Math.round(state.attributes.current_position) : undefined;
-      await this.commandApi.completeEntity({ commandId: command.commandId, observedPosition: position, observedState: state.state, success: true });
+      const brightness = brightnessPercent(state.attributes.brightness);
+      const colorTemperature = colorTemperatureKelvin(state.attributes);
+      const rgbColor = rgb(state.attributes.rgb_color);
+      await this.commandApi.completeEntity({ commandId: command.commandId, observedBrightness: brightness, observedColorTemperature: colorTemperature, observedPosition: position, observedRgbColor: rgbColor, observedState: state.state, success: true });
       return "completed";
     } catch (error) {
       await this.commandApi.completeEntity({ commandId: command.commandId, errorCode: error instanceof HomeAssistantGatewayError ? error.code : "gateway.unexpected_error", success: false });
@@ -99,11 +102,11 @@ export class HttpGatewayCommandApi implements GatewayCommandApi {
     const response = await this.request({ mode: "entity_claim" });
     if (response.status === 204) return null;
     const data = await response.json().catch(() => null) as ActiveEntityCommand | null;
-    if (!response.ok || !data || typeof data.commandId !== "string" || typeof data.entityId !== "string" || !["light", "cover", "switch"].includes(data.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position"].includes(data.action)) throw new Error("Der Green-Gateway konnte keinen gültigen Geräteauftrag abrufen.");
+    if (!response.ok || !data || typeof data.commandId !== "string" || typeof data.entityId !== "string" || !["light", "cover", "switch"].includes(data.kind) || !["turn_on", "turn_off", "open", "close", "stop", "set_position", "set_light"].includes(data.action) || (data.action === "set_position" && !percentage(data.targetPosition)) || (data.action === "set_light" && (!percentage(data.targetBrightness) || (!colorTemperature(data.targetColorTemperature) && !rgb(data.targetRgbColor))))) throw new Error("Der Green-Gateway konnte keinen gültigen Geräteauftrag abrufen.");
     return data;
   }
 
-  async completeEntity(input: { commandId: string; errorCode?: string; observedPosition?: number; observedState?: string; success: boolean }): Promise<void> {
+  async completeEntity(input: { commandId: string; errorCode?: string; observedBrightness?: number; observedColorTemperature?: number; observedPosition?: number; observedRgbColor?: readonly [number, number, number]; observedState?: string; success: boolean }): Promise<void> {
     const response = await this.request({ mode: "entity_complete", ...input });
     if (!response.ok) throw new Error("Der Green-Gateway konnte das Geräteergebnis nicht sicher zurückmelden.");
   }
@@ -116,4 +119,28 @@ export class HttpGatewayCommandApi implements GatewayCommandApi {
       signal: AbortSignal.timeout(8_000)
     }).catch(() => { throw new Error("Die sichere Verbindung zum Hoebbie-Server ist nicht erreichbar."); });
   }
+}
+
+function brightnessPercent(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 255 ? Math.round((value / 255) * 100) : undefined;
+}
+
+function percentage(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100;
+}
+
+function colorTemperature(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1000 && value <= 10000;
+}
+
+function colorTemperatureKelvin(attributes: Record<string, unknown>): number | undefined {
+  if (typeof attributes.color_temp_kelvin === "number" && Number.isFinite(attributes.color_temp_kelvin)) return Math.round(attributes.color_temp_kelvin);
+  if (typeof attributes.color_temp === "number" && Number.isFinite(attributes.color_temp) && attributes.color_temp > 0) return Math.round(1_000_000 / attributes.color_temp);
+  return undefined;
+}
+
+function rgb(value: unknown): [number, number, number] | undefined {
+  return Array.isArray(value) && value.length === 3 && value.every((component) => typeof component === "number" && Number.isInteger(component) && component >= 0 && component <= 255)
+    ? [value[0] as number, value[1] as number, value[2] as number]
+    : undefined;
 }
