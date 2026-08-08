@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
+import { heartbeatMessage, isCommandReady, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -164,9 +165,9 @@ async function verifiedHomeState(expected) {
 
 async function runOnce() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "claim" }) });
-  if (claimed.status === 204) return;
+  if (claimed.status === 204) return false;
   const command = await claimed.json().catch(() => null);
-  if (claimed.ok && command === null) return;
+  if (claimed.ok && command === null) return false;
   if (!claimed.ok) {
     const detail = typeof command?.error === "string" ? command.error : `http_${claimed.status}`;
     throw new Error(`gateway.claim_${detail}`);
@@ -182,6 +183,7 @@ async function runOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("Das Ergebnis konnte nicht sicher protokolliert werden.");
+  return true;
 }
 
 function validEntityCommand(command) {
@@ -242,38 +244,42 @@ async function refreshAfterEntitySuccess(successful) {
 
 async function runEntityRoutineBatch() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim_batch" }) });
-  if (claimed.status === 204) return;
+  if (claimed.status === 204) return false;
   const response = await claimed.json().catch(() => null);
   const commands = response?.commands;
   if (!claimed.ok || !Array.isArray(commands) || commands.length === 0 || commands.some((command) => !validEntityCommand(command))) throw new Error("gateway.entity_claim_batch_invalid");
   const completions = await Promise.all(commands.map((command) => executeEntityCommand(command)));
   await Promise.all(completions.map((completion) => reportEntityCompletion(completion)));
   await refreshAfterEntitySuccess(completions.some((completion) => completion.success));
+  return true;
 }
 
 async function runEntityOnce() {
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "entity_claim" }) });
-  if (claimed.status === 204) return;
+  if (claimed.status === 204) return false;
   const command = await claimed.json().catch(() => null);
   if (!claimed.ok || !validEntityCommand(command)) throw new Error("gateway.entity_claim_invalid");
   const completion = await executeEntityCommand(command);
   await reportEntityCompletion(completion);
   await refreshAfterEntitySuccess(completion.success);
+  return true;
 }
 
 let polling = false;
 let nextInventoryAt = 0;
 let inventoryBurstUntil = 0;
 
-async function poll() {
+async function drainCommands() {
   if (polling) return;
   polling = true;
   try {
-    // Touch routines take priority over a periodic inventory refresh so the
-    // wall action reaches Home Assistant without waiting for registry reads.
-    await runOnce();
-    await runEntityRoutineBatch();
-    await runEntityOnce();
+    // Ein Realtime-Signal enthält nie eine Aktion. Es löst nur die bestehenden,
+    // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
+    // mehrere dicht hintereinander eingereihte Aufträge.
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const [pilotClaimed, routineClaimed, entityClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce()];
+      if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
+    }
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
@@ -285,7 +291,70 @@ async function poll() {
   }
 }
 
-// Commands are claimed at sub-second cadence; inventory itself remains limited
-// to once per minute inside poll().
-setInterval(() => { void poll(); }, 500);
-void poll();
+async function realtimeSession() {
+  const response = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "realtime_session" }) });
+  const session = await response.json().catch(() => null);
+  if (!response.ok || !validRealtimeSession(session)) throw new Error("gateway.realtime_session_invalid");
+  return session;
+}
+
+let realtimeSocket = null;
+let reconnectTimer = null;
+let refreshTimer = null;
+let heartbeatTimer = null;
+let realtimeRef = 0;
+
+function clearRealtimeTimers() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (refreshTimer) clearTimeout(refreshTimer);
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  reconnectTimer = null;
+  refreshTimer = null;
+  heartbeatTimer = null;
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectRealtime(); }, 60_000);
+}
+
+async function connectRealtime() {
+  clearRealtimeTimers();
+  try {
+    const session = await realtimeSession();
+    const topic = realtimeTopic(session.gatewayId);
+    const socket = new WebSocket(realtimeSocketUrl(session));
+    realtimeSocket = socket;
+    socket.addEventListener("open", () => {
+      const ref = ++realtimeRef;
+      socket.send(JSON.stringify(joinMessage(topic, session.accessToken, ref)));
+    });
+    socket.addEventListener("message", (event) => {
+      let message;
+      try { message = JSON.parse(String(event.data)); } catch { return; }
+      if (isCommandReady(message, topic)) void drainCommands();
+      if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply" && message[4]?.status === "ok") {
+        heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
+        const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
+        refreshTimer = setTimeout(() => socket.close(), delay);
+      }
+      if (Array.isArray(message) && message[2] === topic && (message[3] === "phx_error" || message[3] === "phx_close")) socket.close();
+    });
+    socket.addEventListener("error", () => console.error("Die private Realtime-Verbindung des Green-Gateways ist unterbrochen."));
+    socket.addEventListener("close", () => {
+      if (realtimeSocket !== socket) return;
+      clearRealtimeTimers();
+      realtimeSocket = null;
+      scheduleReconnect();
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Die private Realtime-Verbindung des Green-Gateways ist nicht erreichbar.");
+    scheduleReconnect();
+  }
+}
+
+// Der seltene Abgleich holt ausschließlich verpasste Aufträge nach einem
+// Realtime- oder Netzwerkausfall. Er ersetzt kein Dauerpolling.
+setInterval(() => { void drainCommands(); }, 5 * 60_000);
+void drainCommands();
+void connectRealtime();
