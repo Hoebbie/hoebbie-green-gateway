@@ -1,0 +1,22 @@
+name: Gateway CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Test, typecheck and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.10.0
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm test
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm build
