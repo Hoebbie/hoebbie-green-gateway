@@ -333,10 +333,19 @@ async function connectRealtime() {
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
       if (isCommandReady(message, topic)) void drainCommands();
-      if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply" && message[4]?.status === "ok") {
-        heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
-        const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
-        refreshTimer = setTimeout(() => socket.close(), delay);
+      if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
+        if (message[4]?.status === "ok") {
+          heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
+          const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
+          refreshTimer = setTimeout(() => socket.close(), delay);
+          // A command queued while the channel was reconnecting is claimed
+          // only after the private subscription is confirmed.
+          void drainCommands();
+        } else {
+          const reason = typeof message[4]?.response?.reason === "string" ? message[4].response.reason : "unknown";
+          console.error(`gateway.realtime_join_rejected:${reason}`);
+          socket.close();
+        }
       }
       if (Array.isArray(message) && message[2] === topic && (message[3] === "phx_error" || message[3] === "phx_close")) socket.close();
     });
