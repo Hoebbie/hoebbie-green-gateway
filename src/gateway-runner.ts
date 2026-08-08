@@ -16,6 +16,18 @@ export interface GatewayCommandApi {
   complete(input: { commandId: string; errorCode?: string; observedState?: string; success: boolean }): Promise<void>;
 }
 
+export interface GatewayRealtimeSession {
+  accessToken: string;
+  expiresAt: number;
+  gatewayId: string;
+  publishableKey: string;
+  supabaseUrl: string;
+}
+
+export interface GatewayRealtimeSessionApi {
+  realtimeSession(): Promise<GatewayRealtimeSession>;
+}
+
 export interface ActiveEntityCommand { action: "turn_on" | "turn_off" | "open" | "close" | "stop" | "set_position" | "set_light"; commandId: string; entityId: string; kind: "light" | "cover" | "switch"; targetBrightness?: number; targetColorTemperature?: number; targetPosition?: number; targetRgbColor?: readonly [number, number, number]; }
 export interface ActiveEntityCommandApi { claimEntity(): Promise<ActiveEntityCommand | null>; completeEntity(input: { commandId: string; errorCode?: string; observedBrightness?: number; observedColorTemperature?: number; observedPosition?: number; observedRgbColor?: readonly [number, number, number]; observedState?: string; success: boolean }): Promise<void>; }
 
@@ -75,6 +87,10 @@ function safeGatewayUrl(value: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
+function uuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export class HttpGatewayCommandApi implements GatewayCommandApi {
   private readonly environment: GatewayApiEnvironment;
 
@@ -109,6 +125,21 @@ export class HttpGatewayCommandApi implements GatewayCommandApi {
   async completeEntity(input: { commandId: string; errorCode?: string; observedBrightness?: number; observedColorTemperature?: number; observedPosition?: number; observedRgbColor?: readonly [number, number, number]; observedState?: string; success: boolean }): Promise<void> {
     const response = await this.request({ mode: "entity_complete", ...input });
     if (!response.ok) throw new Error("Der Green-Gateway konnte das Geräteergebnis nicht sicher zurückmelden.");
+  }
+
+  async realtimeSession(): Promise<GatewayRealtimeSession> {
+    const response = await this.request({ mode: "realtime_session" });
+    const data = await response.json().catch(() => null) as Partial<GatewayRealtimeSession> | null;
+    if (!response.ok || !data || typeof data.accessToken !== "string" || data.accessToken.length < 80 || typeof data.expiresAt !== "number" || !Number.isFinite(data.expiresAt) || typeof data.gatewayId !== "string" || !uuid(data.gatewayId) || typeof data.publishableKey !== "string" || data.publishableKey.length < 10 || typeof data.supabaseUrl !== "string") {
+      throw new Error("Der Green-Gateway konnte keine sichere Echtzeitverbindung einrichten.");
+    }
+    return {
+      accessToken: data.accessToken,
+      expiresAt: data.expiresAt,
+      gatewayId: data.gatewayId,
+      publishableKey: data.publishableKey,
+      supabaseUrl: safeGatewayUrl(data.supabaseUrl)
+    };
   }
 
   private async request(body: Record<string, unknown>): Promise<Response> {
