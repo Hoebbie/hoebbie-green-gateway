@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { heartbeatMessage, isCommandReady, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
+import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
 const session = {
   accessToken: "x".repeat(80),
@@ -26,6 +26,14 @@ test("only accepts a data-free command-ready broadcast on the matching topic", (
   assert.equal(isCommandReady([null, null, topic, "broadcast", { event: "command_ready", payload: {} }], topic), true);
   assert.equal(isCommandReady([null, null, topic, "broadcast", { event: "turn_on" }], topic), false);
   assert.equal(isCommandReady([null, null, "realtime:other", "broadcast", { event: "command_ready" }], topic), false);
+});
+
+test("accepts only a data-free inventory refresh on the matching private topic", () => {
+  const topic = realtimeTopic(session.gatewayId);
+  assert.equal(isInventoryRefresh([null, null, topic, "broadcast", { event: "inventory_refresh", payload: {} }], topic), true);
+  assert.equal(isInventoryRefresh([null, null, topic, "broadcast", { event: "inventory_refresh", payload: { entityId: "light.secret" } }], topic), true);
+  assert.equal(isInventoryRefresh([null, null, "realtime:other", "broadcast", { event: "inventory_refresh" }], topic), false);
+  assert.equal(isInventoryRefresh([null, null, topic, "broadcast", { event: "command_ready" }], topic), false);
 });
 
 test("validates short-lived gateway sessions and WebSocket endpoint", () => {

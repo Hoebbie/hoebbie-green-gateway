@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
-import { heartbeatMessage, isCommandReady, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
+import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -333,6 +333,12 @@ async function connectRealtime() {
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
       if (isCommandReady(message, topic)) void drainCommands();
+      // This signal contains no device data and only advances the next
+      // read-only inventory report. It never enters a command path.
+      if (isInventoryRefresh(message, topic)) {
+        nextInventoryAt = Date.now();
+        void drainCommands();
+      }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {
           heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
