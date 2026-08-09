@@ -17,6 +17,13 @@ vom Kanal, von der Nachricht oder vom Claim-Pfad abgegrenzt werden.
    Anmeldung, Empfang eines rein kategorischen Weckereignisses,
    Wiederverbindung und Claim-Ergebnis. Gerätekennungen, Schlüssel und
    Befehlsinhalte werden nicht geloggt.
+   Ein Socket ohne bestätigte private Kanal-Anmeldung wird nach 15 Sekunden
+   geschlossen und kontrolliert neu aufgebaut; er kann keine Aufträge mehr
+   stumm bis zum seltenen Rückfallabruf blockieren.
+   Wiederverbindungsversuche beginnen nach fünf Sekunden und werden bis auf
+   maximal eine Minute gedrosselt. Nach einer erfolgreichen Anmeldung wird
+   die kurze erste Stufe zurückgesetzt; im stabilen Leerlauf entstehen keine
+   zusätzlichen Abrufe.
 2. Den bestehenden, serverseitig autorisierten Claim- und Bestätigungspfad
    unverändert beibehalten. Ein Realtime-Ereignis führt selbst weiterhin
    keinerlei Aktion aus.

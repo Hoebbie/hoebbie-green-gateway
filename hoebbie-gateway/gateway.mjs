@@ -305,20 +305,26 @@ let realtimeSocket = null;
 let reconnectTimer = null;
 let refreshTimer = null;
 let heartbeatTimer = null;
+let joinTimer = null;
 let realtimeRef = 0;
+let reconnectDelay = 5_000;
 
 function clearRealtimeTimers() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (refreshTimer) clearTimeout(refreshTimer);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (joinTimer) clearTimeout(joinTimer);
   reconnectTimer = null;
   refreshTimer = null;
   heartbeatTimer = null;
+  joinTimer = null;
 }
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectRealtime(); }, 60_000);
+  const delay = reconnectDelay;
+  reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectRealtime(); }, delay);
 }
 
 async function connectRealtime() {
@@ -332,6 +338,13 @@ async function connectRealtime() {
       const ref = ++realtimeRef;
       console.info("gateway.realtime_socket_open");
       socket.send(JSON.stringify(joinMessage(topic, session.accessToken, ref)));
+      // A socket without a phx_join reply cannot receive private broadcasts.
+      // Close it explicitly instead of leaving command delivery stalled until
+      // the rare fallback poll happens.
+      joinTimer = setTimeout(() => {
+        console.error("gateway.realtime_join_timeout");
+        socket.close();
+      }, 15_000);
     });
     socket.addEventListener("message", (event) => {
       let message;
@@ -348,6 +361,9 @@ async function connectRealtime() {
       }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {
+          if (joinTimer) clearTimeout(joinTimer);
+          joinTimer = null;
+          reconnectDelay = 5_000;
           console.info("gateway.realtime_joined");
           heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
           const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
@@ -356,6 +372,8 @@ async function connectRealtime() {
           // only after the private subscription is confirmed.
           void drainCommands();
         } else {
+          if (joinTimer) clearTimeout(joinTimer);
+          joinTimer = null;
           const reason = typeof message[4]?.response?.reason === "string" ? message[4].response.reason : "unknown";
           console.error(`gateway.realtime_join_rejected:${reason}`);
           socket.close();
