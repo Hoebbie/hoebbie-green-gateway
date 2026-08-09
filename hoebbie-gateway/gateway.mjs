@@ -272,6 +272,7 @@ let inventoryBurstUntil = 0;
 async function drainCommands() {
   if (polling) return;
   polling = true;
+  let claimedCommands = 0;
   try {
     // Ein Realtime-Signal enthält nie eine Aktion. Es löst nur die bestehenden,
     // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
@@ -279,6 +280,7 @@ async function drainCommands() {
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const [pilotClaimed, routineClaimed, entityClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce()];
       if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
+      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed);
     }
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
@@ -288,6 +290,7 @@ async function drainCommands() {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
     polling = false;
+    if (claimedCommands > 0) console.info(`gateway.command_claimed:${claimedCommands}`);
   }
 }
 
@@ -327,12 +330,16 @@ async function connectRealtime() {
     realtimeSocket = socket;
     socket.addEventListener("open", () => {
       const ref = ++realtimeRef;
+      console.info("gateway.realtime_socket_open");
       socket.send(JSON.stringify(joinMessage(topic, session.accessToken, ref)));
     });
     socket.addEventListener("message", (event) => {
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
-      if (isCommandReady(message, topic)) void drainCommands();
+      if (isCommandReady(message, topic)) {
+        console.info("gateway.realtime_command_ready");
+        void drainCommands();
+      }
       // This signal contains no device data and only advances the next
       // read-only inventory report. It never enters a command path.
       if (isInventoryRefresh(message, topic)) {
@@ -341,6 +348,7 @@ async function connectRealtime() {
       }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {
+          console.info("gateway.realtime_joined");
           heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
           const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
           refreshTimer = setTimeout(() => socket.close(), delay);
@@ -360,6 +368,7 @@ async function connectRealtime() {
       if (realtimeSocket !== socket) return;
       clearRealtimeTimers();
       realtimeSocket = null;
+      console.warn("gateway.realtime_closed");
       scheduleReconnect();
     });
   } catch (error) {
