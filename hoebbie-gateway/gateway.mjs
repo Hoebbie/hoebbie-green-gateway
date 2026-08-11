@@ -139,6 +139,7 @@ function discoveredEntity(state, areaNames) {
     kind,
     position: currentPosition(attributes),
     rgbColor: currentRgbColor(attributes),
+    safetyClass: kind === "cover" && attributes.device_class === "garage" ? "garage" : "standard",
     state: state.state
   };
 }
