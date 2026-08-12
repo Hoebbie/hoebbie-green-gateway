@@ -39,6 +39,10 @@ const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mill
 const supportedKinds = new Set(["light", "cover", "switch"]);
 const maintenanceSwitch = /(autoplay|gruppierung|hue bridge|sonos|loudness|lautstärke|volume|equalizer|night sound)/i;
 const nonHouseholdEntity = /^(bürostrahler|ess?zimmer überblenden|küche überblenden|erdgeschoss|flur sensor aktiviert|flur lichtsensor aktiviert|wohnzimmer nachtton|wohnzimmer sprachverbesserung|wohnzimmer surround aktiviert|wohnzimmer überblenden)$/i;
+// Meross MSG100 exposes buzzer and do-not-disturb implementation entities next
+// to the actual `cover.*_garage`. They are setup switches, not household
+// controls, and must never be offered to Hoebbie or Alfred.
+const merossGarageMaintenanceEntity = /(?:_dnd$|_buzzerenable$)/i;
 
 function currentPosition(attributes) {
   const value = typeof attributes?.current_position === "number" ? attributes.current_position : Number(attributes?.current_position);
@@ -115,7 +119,7 @@ function discoveredEntity(state, areaNames) {
   if (!displayName) return null;
   // Media and bridge-maintenance switches are not household controls. They
   // remain available to a future explicit media/Alfred adapter, never D3 touch.
-  if (nonHouseholdEntity.test(displayName) || (kind === "switch" && maintenanceSwitch.test(displayName))) return null;
+  if (nonHouseholdEntity.test(displayName) || (kind === "switch" && maintenanceSwitch.test(displayName)) || merossGarageMaintenanceEntity.test(state.entity_id)) return null;
   const capabilities = [];
   if (kind === "light") {
     capabilities.push("turn_on", "turn_off");
