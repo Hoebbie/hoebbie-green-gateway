@@ -35,9 +35,13 @@ function displayName(value) {
 function playerFromResponse(value) {
   if (!value || typeof value !== "object") return null;
   const id = playerId(value.player_id);
-  const name = displayName(value.display_name);
+  // Music Assistant 2.8 exposes the public PlayerState model with `name`
+  // and `playback_state`. Older server releases used `display_name` and
+  // `state`; accepting both keeps the read-only adapter version-tolerant.
+  const name = displayName(value.name ?? value.display_name);
   if (!id || !name || typeof value.available !== "boolean" || typeof value.powered !== "boolean") return null;
-  const state = typeof value.state === "string" ? value.state.toUpperCase() : "";
+  const rawState = value.playback_state ?? value.state;
+  const state = typeof rawState === "string" ? rawState.toUpperCase() : "";
   const volume = typeof value.volume_level === "number" && Number.isFinite(value.volume_level) && value.volume_level >= 0 && value.volume_level <= 100
     ? Math.round(value.volume_level)
     : null;

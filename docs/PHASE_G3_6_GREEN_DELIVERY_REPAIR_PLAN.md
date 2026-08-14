@@ -21,6 +21,11 @@ ohne Antwortinhalt oder ungültige Antwortform. Sie protokolliert weder Token,
 URL, Player-IDs, Namen noch Medieninhalte. Dadurch lässt sich eine fehlerhafte
 lokale Konfiguration kontrolliert abgrenzen, ohne Zugangsdaten offenzulegen.
 
+Die Zielabfrage verarbeitet sowohl das aktuelle öffentliche `PlayerState`-
+Format (`name`, `playback_state`) als auch die gleichwertigen Feldnamen
+älterer Music-Assistant-Versionen. Es bleibt bei einer reinen, validierten
+Inventarabfrage; es werden keine Player-Befehle gesendet.
+
 1. Den Green-Realtime-Lebenszyklus datensparsam protokollierbar machen:
    Anmeldung, Empfang eines rein kategorischen Weckereignisses,
    Wiederverbindung und Claim-Ergebnis. Gerätekennungen, Schlüssel und

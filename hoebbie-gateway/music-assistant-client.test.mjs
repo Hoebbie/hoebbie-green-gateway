@@ -22,6 +22,11 @@ test("uses only the fixed player discovery command", async () => {
   assert.deepEqual(JSON.parse(calls[0].options.body), { args: {}, command: "players/all", message_id: "1" });
 });
 
+test("accepts the current Music Assistant PlayerState response", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: [{ available: true, name: "Wohnzimmer", player_id: "sonos:RINCON_123", playback_state: "playing", powered: true, volume_level: 42 }] }), { status: 200 }));
+  assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Wohnzimmer", id: "sonos:RINCON_123", isPlaying: true, powered: true, volume: 42 }]);
+});
+
 test("rejects malformed players instead of guessing a target", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: [{ available: true, display_name: "Küche", player_id: "sonos kitchen", powered: true }] }), { status: 200 }));
   await assert.rejects(client.listPlayers(), { code: "music_assistant.invalid_response" });
