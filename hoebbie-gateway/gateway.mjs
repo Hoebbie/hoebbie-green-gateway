@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand } from "./music-assistant-client.mjs";
+import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -328,9 +329,19 @@ async function runMusicOnce() {
   if (!claimed.ok || !validMusicCommand(command)) throw new Error("gateway.music_claim_invalid");
   let completion;
   try {
-    completion = { commandId: command.commandId, mode: "music_complete", observedIsPlaying: await musicAssistant.setPlayback(command), success: true };
+    completion = {
+      commandId: command.commandId,
+      mode: "music_complete",
+      observedIsPlaying: await withinDeadline(musicAssistant.setPlayback(command), 7_000, "music_assistant.command_timeout"),
+      success: true
+    };
   } catch (error) {
-    completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "music_assistant.unexpected_error", mode: "music_complete", success: false };
+    const errorCode = error && typeof error === "object" && typeof error.code === "string"
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : "music_assistant.unexpected_error";
+    completion = { commandId: command.commandId, errorCode: errorCode.slice(0, 100), mode: "music_complete", success: false };
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_completion_failed");
@@ -342,7 +353,14 @@ let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
 let inventoryBurstUntil = 0;
 
-async function drainCommands() {
+const musicCommandDrain = new BoundedQueueDrain({
+  claimOnce: runMusicOnce,
+  onClaimed: (count) => console.info(`gateway.music_command_claimed:${count}`),
+  onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"),
+  onLimit: () => console.error("Der Music-Assistant-Gateway hat die Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
+});
+
+async function drainDeviceCommands() {
   if (polling) return;
   polling = true;
   let claimedCommands = 0;
@@ -351,9 +369,9 @@ async function drainCommands() {
     // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
     // mehrere dicht hintereinander eingereihte Aufträge.
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      const [pilotClaimed, routineClaimed, entityClaimed, musicClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce(), await runMusicOnce()];
-      if (!pilotClaimed && !routineClaimed && !entityClaimed && !musicClaimed) break;
-      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed) + Number(musicClaimed);
+      const [pilotClaimed, routineClaimed, entityClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce()];
+      if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
+      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed);
     }
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
@@ -369,6 +387,13 @@ async function drainCommands() {
     polling = false;
     if (claimedCommands > 0) console.info(`gateway.command_claimed:${claimedCommands}`);
   }
+}
+
+function drainCommands() {
+  // Music has its own bounded worker. It must never wait behind a slow light,
+  // routine or inventory request and cannot keep those queues locked either.
+  void musicCommandDrain.request();
+  void drainDeviceCommands();
 }
 
 async function realtimeSession() {
@@ -434,7 +459,7 @@ async function connectRealtime() {
       // read-only inventory report. It never enters a command path.
       if (isInventoryRefresh(message, topic)) {
         nextInventoryAt = Date.now();
-        void drainCommands();
+        void drainDeviceCommands();
       }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {

@@ -9,6 +9,7 @@ LABEL \
 RUN apk add --no-cache nodejs
 COPY gateway.mjs /app/gateway.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs
+COPY queue-drain.mjs /app/queue-drain.mjs
 COPY realtime-protocol.mjs /app/realtime-protocol.mjs
 COPY routine-target.mjs /app/routine-target.mjs
 COPY run.sh /run.sh
