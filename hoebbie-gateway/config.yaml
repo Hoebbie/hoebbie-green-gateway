@@ -1,7 +1,7 @@
 name: Hoebbie Green Gateway
 slug: hoebbie_green_gateway
 description: Hoebbie-Geräteinventar und erlaubte Steuerung über einen ausgehenden Green-Gateway.
-version: "0.3.5"
+version: "0.3.6"
 url: https://github.com/Hoebbie/hoebbie-green-gateway
 arch:
   - aarch64
@@ -12,5 +12,9 @@ homeassistant_api: true
 # Es gibt keine user-entered endpoint, token, oder entity-ID Felder. Der Green
 # nutzt ausschließlich das Supervisor-Token und meldet Räume über die lokale
 # Home-Assistant-Registry.
-options: {}
-schema: {}
+options:
+  music_assistant_access_token: ""
+  music_assistant_url: ""
+schema:
+  music_assistant_access_token: "password?"
+  music_assistant_url: "url?"
