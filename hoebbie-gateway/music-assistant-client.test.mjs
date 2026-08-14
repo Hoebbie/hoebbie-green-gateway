@@ -32,3 +32,18 @@ test("accepts native provider ids without interpreting them", async () => {
   const players = await client.listPlayers();
   assert.equal(players[0].id, "ha/media_player.leo_echo");
 });
+
+test("reports a safe reason when Music Assistant rejects the token", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(null, { status: 401 }));
+  await assert.rejects(client.listPlayers(), { code: "music_assistant.authentication_failed" });
+});
+
+test("reports a safe reason when Music Assistant cannot be reached", async () => {
+  const client = new MusicAssistantClient(config, async () => { throw new Error("network unavailable"); });
+  await assert.rejects(client.listPlayers(), { code: "music_assistant.connection_failed" });
+});
+
+test("reports a safe HTTP status category without response content", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(null, { status: 404 }));
+  await assert.rejects(client.listPlayers(), { code: "music_assistant.api_http_404" });
+});

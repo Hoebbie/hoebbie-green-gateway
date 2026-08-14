@@ -13,6 +13,14 @@ vom Kanal, von der Nachricht oder vom Claim-Pfad abgegrenzt werden.
 
 ## Plan
 
+### Ergänzung vom 14. August 2026 – Music-Assistant-Inventar
+
+Die Music-Assistant-Zielabfrage meldet nur kategorische, datensparsame
+Fehlercodes: lokale Verbindung nicht erreichbar, Zugang abgelehnt, HTTP-Status
+ohne Antwortinhalt oder ungültige Antwortform. Sie protokolliert weder Token,
+URL, Player-IDs, Namen noch Medieninhalte. Dadurch lässt sich eine fehlerhafte
+lokale Konfiguration kontrolliert abgrenzen, ohne Zugangsdaten offenzulegen.
+
 1. Den Green-Realtime-Lebenszyklus datensparsam protokollierbar machen:
    Anmeldung, Empfang eines rein kategorischen Weckereignisses,
    Wiederverbindung und Claim-Ergebnis. Gerätekennungen, Schlüssel und

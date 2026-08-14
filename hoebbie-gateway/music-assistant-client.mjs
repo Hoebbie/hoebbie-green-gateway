@@ -66,15 +66,26 @@ export class MusicAssistantClient {
   }
 
   async listPlayers() {
-    const response = await this.fetcher(`${this.config.baseUrl}/api`, {
-      body: JSON.stringify({ args: {}, command: "players/all", message_id: String(++this.#sequence) }),
-      headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" },
-      method: "POST",
-      signal: AbortSignal.timeout(5_000)
-    }).catch(() => null);
+    let response;
+    try {
+      response = await this.fetcher(`${this.config.baseUrl}/api`, {
+        body: JSON.stringify({ args: {}, command: "players/all", message_id: String(++this.#sequence) }),
+        headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" },
+        method: "POST",
+        signal: AbortSignal.timeout(5_000)
+      });
+    } catch {
+      throw new MusicAssistantGatewayError("music_assistant.connection_failed", "Music Assistant ist über die konfigurierte lokale Adresse nicht erreichbar.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new MusicAssistantGatewayError("music_assistant.authentication_failed", "Der Music-Assistant-Zugang wurde abgelehnt.");
+    }
+    if (!response.ok) {
+      throw new MusicAssistantGatewayError(`music_assistant.api_http_${response.status}`, "Music Assistant hat die Zielabfrage nicht angenommen.");
+    }
     const payload = response ? await response.json().catch(() => null) : null;
-    if (!response?.ok || !payload || typeof payload !== "object" || !Array.isArray(payload.result)) {
-      throw new MusicAssistantGatewayError("music_assistant.discovery_unavailable", "Music Assistant konnte die Wiedergabeziele nicht lesen.");
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.result)) {
+      throw new MusicAssistantGatewayError("music_assistant.invalid_response", "Music Assistant hat eine ungültige Zielantwort geliefert.");
     }
     const players = [];
     for (const result of payload.result) {
