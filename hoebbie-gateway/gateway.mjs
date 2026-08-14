@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
-import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
+import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -435,6 +435,7 @@ async function connectRealtime() {
     const session = await realtimeSession();
     const topic = realtimeTopic(session.gatewayId);
     const socket = new WebSocket(realtimeSocketUrl(session));
+    socket.binaryType = "arraybuffer";
     realtimeSocket = socket;
     socket.addEventListener("open", () => {
       const ref = ++realtimeRef;
@@ -448,9 +449,9 @@ async function connectRealtime() {
         socket.close();
       }, 15_000);
     });
-    socket.addEventListener("message", (event) => {
-      let message;
-      try { message = JSON.parse(String(event.data)); } catch { return; }
+    socket.addEventListener("message", async (event) => {
+      const message = await decodeRealtimeMessage(event.data);
+      if (!message) return;
       if (isCommandReady(message, topic)) {
         console.info("gateway.realtime_command_ready");
         void drainCommands();

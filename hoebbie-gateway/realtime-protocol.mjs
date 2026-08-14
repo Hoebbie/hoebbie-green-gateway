@@ -30,6 +30,7 @@ export function joinMessage(topic, accessToken, ref) {
     config: {
       broadcast: { ack: false, self: false },
       presence: { enabled: false },
+      postgres_changes: [],
       private: true
     }
   }];
@@ -37,6 +38,59 @@ export function joinMessage(topic, accessToken, ref) {
 
 export function heartbeatMessage(ref) {
   return [null, String(ref), "phoenix", "heartbeat", {}];
+}
+
+function decodeBinaryBroadcast(buffer) {
+  const view = new DataView(buffer);
+  // Supabase Realtime protocol 2.0 uses frame type 4 for broadcasts sent by
+  // the server. All other protocol messages continue to arrive as JSON text.
+  if (view.byteLength < 5 || view.getUint8(0) !== 4) return null;
+
+  const topicSize = view.getUint8(1);
+  const eventSize = view.getUint8(2);
+  const metadataSize = view.getUint8(3);
+  const payloadEncoding = view.getUint8(4);
+  const headerSize = 5;
+  const payloadOffset = headerSize + topicSize + eventSize + metadataSize;
+  if (payloadOffset > view.byteLength || payloadEncoding !== 1) return null;
+
+  const decoder = new TextDecoder();
+  let offset = headerSize;
+  const topic = decoder.decode(buffer.slice(offset, offset + topicSize));
+  offset += topicSize;
+  const event = decoder.decode(buffer.slice(offset, offset + eventSize));
+  offset += eventSize;
+  const metadataText = decoder.decode(buffer.slice(offset, offset + metadataSize));
+  const payloadText = decoder.decode(buffer.slice(payloadOffset));
+
+  let metadata = {};
+  let payload = {};
+  try {
+    if (metadataText) metadata = JSON.parse(metadataText);
+    if (payloadText) payload = JSON.parse(payloadText);
+  } catch {
+    return null;
+  }
+
+  return [null, null, topic, "broadcast", { event, payload, meta: metadata }];
+}
+
+/** Decode both JSON text frames and protocol-2 binary broadcast frames. */
+export async function decodeRealtimeMessage(raw) {
+  if (typeof raw === "string") {
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+
+  let buffer = null;
+  if (raw instanceof ArrayBuffer) {
+    buffer = raw;
+  } else if (ArrayBuffer.isView(raw)) {
+    buffer = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+  } else if (typeof Blob !== "undefined" && raw instanceof Blob) {
+    buffer = await raw.arrayBuffer();
+  }
+
+  return buffer ? decodeBinaryBroadcast(buffer) : null;
 }
 
 export function isCommandReady(message, topic) {
