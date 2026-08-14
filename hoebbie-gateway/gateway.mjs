@@ -47,10 +47,25 @@ console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKey
 async function reportMusicAssistantDiscovery() {
   if (!musicAssistant) return;
   const players = await musicAssistant.listPlayers();
+  const reported = await request(gatewayUrl, {
+    method: "POST",
+    headers: gatewayHeaders,
+    body: JSON.stringify({
+      mode: "music_inventory",
+      players: players.map((player) => ({
+        available: player.available,
+        displayName: player.displayName,
+        isPlaying: player.isPlaying,
+        playerId: player.id,
+        powered: player.powered,
+        volume: player.volume
+      }))
+    })
+  });
+  if (!reported.ok) throw new Error("gateway.music_inventory_report_failed");
   const available = players.filter((player) => player.available).length;
   const playing = players.filter((player) => player.isPlaying).length;
-  // No player ids, names, sources or credentials leave the Green in this
-  // first proof. The count only confirms the local adapter is reachable.
+  // Logs deliberately contain neither player ids/names nor credentials.
   console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
 }
 
@@ -299,6 +314,7 @@ async function runEntityOnce() {
 
 let polling = false;
 let nextInventoryAt = 0;
+let nextMusicInventoryAt = 0;
 let inventoryBurstUntil = 0;
 
 async function drainCommands() {
@@ -317,6 +333,10 @@ async function drainCommands() {
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
+    }
+    if (Date.now() >= nextMusicInventoryAt) {
+      await reportMusicAssistantDiscovery();
+      nextMusicInventoryAt = Date.now() + 60_000;
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
