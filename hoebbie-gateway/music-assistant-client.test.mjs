@@ -26,3 +26,9 @@ test("rejects malformed players instead of guessing a target", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: [{ available: true, display_name: "Küche", player_id: "sonos kitchen", powered: true }] }), { status: 200 }));
   await assert.rejects(client.listPlayers(), { code: "music_assistant.invalid_response" });
 });
+
+test("accepts native provider ids without interpreting them", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: [{ available: true, display_name: "Leo", player_id: "ha/media_player.leo_echo", powered: true, state: "idle" }] }), { status: 200 }));
+  const players = await client.listPlayers();
+  assert.equal(players[0].id, "ha/media_player.leo_echo");
+});

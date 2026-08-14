@@ -20,7 +20,10 @@ function normalizedUrl(value) {
 }
 
 function playerId(value) {
-  return typeof value === "string" && /^[A-Za-z0-9:_-]{1,200}$/.test(value) ? value : null;
+  // Native providers use different identifier schemes. The value remains a
+  // JSON argument to fixed commands only; it is never interpreted as a URL or
+  // executable command.
+  return typeof value === "string" && /^[A-Za-z0-9:._/-]{1,200}$/.test(value) ? value : null;
 }
 
 function displayName(value) {

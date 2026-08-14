@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { MusicAssistantClient } from "./music-assistant-client.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -29,9 +30,29 @@ function gatewayKeyFromPersistentStorage() {
 const gatewayKey = gatewayKeyFromPersistentStorage();
 const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
 
+function musicAssistantClientFromEnvironment() {
+  const baseUrl = process.env.MUSIC_ASSISTANT_URL?.trim() ?? "";
+  const accessToken = process.env.MUSIC_ASSISTANT_ACCESS_TOKEN?.trim() ?? "";
+  if (!baseUrl && !accessToken) return null;
+  if (!baseUrl || !accessToken) throw new Error("Die Music-Assistant-Konfiguration ist unvollständig.");
+  return new MusicAssistantClient({ accessToken, baseUrl });
+}
+
+const musicAssistant = musicAssistantClientFromEnvironment();
+
 if (!gatewayUrl.startsWith("https://") || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
 
 console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKeyDigest}`);
+
+async function reportMusicAssistantDiscovery() {
+  if (!musicAssistant) return;
+  const players = await musicAssistant.listPlayers();
+  const available = players.filter((player) => player.available).length;
+  const playing = players.filter((player) => player.isPlaying).length;
+  // No player ids, names, sources or credentials leave the Green in this
+  // first proof. The count only confirms the local adapter is reachable.
+  console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
+}
 
 const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Type": "application/json" };
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
@@ -109,6 +130,12 @@ async function resolvePilotEntityId() {
 
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
+await reportMusicAssistantDiscovery().catch((error) => {
+  const code = error && typeof error === "object" && typeof error.code === "string"
+    ? error.code
+    : "music_assistant.discovery_unavailable";
+  console.error(code);
+});
 
 function discoveredEntity(state, areaNames) {
   if (typeof state?.entity_id !== "string") return null;
