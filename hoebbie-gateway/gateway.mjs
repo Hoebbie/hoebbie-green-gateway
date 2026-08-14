@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, validMusicCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand } from "./music-assistant-client.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -68,6 +68,12 @@ async function reportMusicAssistantDiscovery() {
   // Logs deliberately contain neither player ids/names nor credentials.
   console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
 }
+
+const musicAssistantRealtime = musicAssistant
+  ? new MusicAssistantRealtime(musicAssistant.config, () => {
+    void reportMusicAssistantDiscovery().catch(() => console.error("music_assistant.live_state_report_failed"));
+  })
+  : null;
 
 const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Type": "application/json" };
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
@@ -471,3 +477,4 @@ async function connectRealtime() {
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();
 void connectRealtime();
+musicAssistantRealtime?.start();
