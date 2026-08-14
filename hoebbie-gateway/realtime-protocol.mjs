@@ -48,3 +48,14 @@ export function isCommandReady(message, topic) {
     && typeof message[4] === "object"
     && message[4].event === "command_ready";
 }
+
+/** A refresh signal only asks Green to read its local Home Assistant state. */
+export function isInventoryRefresh(message, topic) {
+  return Array.isArray(message)
+    && message.length === 5
+    && message[2] === topic
+    && message[3] === "broadcast"
+    && message[4] !== null
+    && typeof message[4] === "object"
+    && message[4].event === "inventory_refresh";
+}

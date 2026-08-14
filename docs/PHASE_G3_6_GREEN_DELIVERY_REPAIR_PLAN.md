@@ -1,0 +1,60 @@
+# Phase G3.6 – zuverlässige Green-Zustellung für Alfred
+
+Stand: 9. August 2026  
+Status: in Umsetzung nach Freigabe
+
+## Befund
+
+Ein Alfred-Einzelauftrag wird serverseitig korrekt validiert und als
+`queued` gespeichert. Der Green beansprucht ihn jedoch nicht sofort. Die
+private Realtime-Verbindung meldet bisher weder ihre erfolgreiche Anmeldung
+noch den Empfang eines Weckereignisses. Deshalb kann der Fehler nicht sicher
+vom Kanal, von der Nachricht oder vom Claim-Pfad abgegrenzt werden.
+
+## Plan
+
+### Ergänzung vom 14. August 2026 – Music-Assistant-Inventar
+
+Die Music-Assistant-Zielabfrage meldet nur kategorische, datensparsame
+Fehlercodes: lokale Verbindung nicht erreichbar, Zugang abgelehnt, HTTP-Status
+ohne Antwortinhalt oder ungültige Antwortform. Sie protokolliert weder Token,
+URL, Player-IDs, Namen noch Medieninhalte. Dadurch lässt sich eine fehlerhafte
+lokale Konfiguration kontrolliert abgrenzen, ohne Zugangsdaten offenzulegen.
+
+Die Zielabfrage verarbeitet sowohl das aktuelle öffentliche `PlayerState`-
+Format (`name`, `playback_state`) als auch die gleichwertigen Feldnamen
+älterer Music-Assistant-Versionen. Es bleibt bei einer reinen, validierten
+Inventarabfrage; es werden keine Player-Befehle gesendet.
+
+Die offizielle HTTP-API liefert das Ergebnis eines Befehls direkt als JSON
+(für `players/all` also eine Liste), während der WebSocket-Protokollrahmen ein
+`result`-Feld verwendet. Der Green akzeptiert ausschließlich diese beiden
+definierten Formen und verarbeitet keine beliebigen Objektantworten.
+
+1. Den Green-Realtime-Lebenszyklus datensparsam protokollierbar machen:
+   Anmeldung, Empfang eines rein kategorischen Weckereignisses,
+   Wiederverbindung und Claim-Ergebnis. Gerätekennungen, Schlüssel und
+   Befehlsinhalte werden nicht geloggt.
+   Ein Socket ohne bestätigte private Kanal-Anmeldung wird nach 15 Sekunden
+   geschlossen und kontrolliert neu aufgebaut; er kann keine Aufträge mehr
+   stumm bis zum seltenen Rückfallabruf blockieren.
+   Wiederverbindungsversuche beginnen nach fünf Sekunden und werden bis auf
+   maximal eine Minute gedrosselt. Nach einer erfolgreichen Anmeldung wird
+   die kurze erste Stufe zurückgesetzt; im stabilen Leerlauf entstehen keine
+   zusätzlichen Abrufe.
+2. Den bestehenden, serverseitig autorisierten Claim- und Bestätigungspfad
+   unverändert beibehalten. Ein Realtime-Ereignis führt selbst weiterhin
+   keinerlei Aktion aus.
+3. Alfred darf bei einer erfolgreichen Einreihung nur die Weitergabe
+   bestätigen, nicht den Schalt-Endzustand behaupten. Erst die bestätigte
+   Green-Rückmeldung berechtigt zu einer Erfolgsantwort.
+4. Unit- und Integrationsregressionen für Einzelgeräte, Gruppen und Routinen
+   ausführen. Kein Auftrag wird durch Tests an ein reales Gerät gesendet.
+
+## Latenz- und Sicherheitsentscheidung
+
+Die Reparatur erhöht den Reasoning-Aufwand von `gpt-realtime-2.1` nicht;
+Alfred bleibt bei `low`. Der Green behält den ereignisbasierten Weg statt eines
+ständigen Zwei-Sekunden-Pollings. Damit bleiben Kosten und Latenz stabil. Die
+alleinige Seltenheitsabfrage bleibt nur ein Ausfallrückfall und ist keine
+Erfolgsbestätigung.

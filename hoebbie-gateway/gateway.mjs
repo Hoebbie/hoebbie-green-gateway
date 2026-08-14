@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { MusicAssistantClient, validMusicCommand } from "./music-assistant-client.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
-import { MusicAssistantClient, validMusicCommand } from "./music-assistant.mjs";
-import { heartbeatMessage, isCommandReady, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
+import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -30,21 +30,55 @@ function gatewayKeyFromPersistentStorage() {
 const gatewayKey = gatewayKeyFromPersistentStorage();
 const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
 
+function musicAssistantClientFromEnvironment() {
+  const baseUrl = process.env.MUSIC_ASSISTANT_URL?.trim() ?? "";
+  const accessToken = process.env.MUSIC_ASSISTANT_ACCESS_TOKEN?.trim() ?? "";
+  if (!baseUrl && !accessToken) return null;
+  if (!baseUrl || !accessToken) throw new Error("Die Music-Assistant-Konfiguration ist unvollständig.");
+  return new MusicAssistantClient({ accessToken, baseUrl });
+}
+
+const musicAssistant = musicAssistantClientFromEnvironment();
+
 if (!gatewayUrl.startsWith("https://") || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
 
 console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKeyDigest}`);
 
+async function reportMusicAssistantDiscovery() {
+  if (!musicAssistant) return;
+  const players = await musicAssistant.listPlayers();
+  const reported = await request(gatewayUrl, {
+    method: "POST",
+    headers: gatewayHeaders,
+    body: JSON.stringify({
+      mode: "music_inventory",
+      players: players.map((player) => ({
+        available: player.available,
+        displayName: player.displayName,
+        isPlaying: player.isPlaying,
+        playerId: player.id,
+        powered: player.powered,
+        volume: player.volume
+      }))
+    })
+  });
+  if (!reported.ok) throw new Error("gateway.music_inventory_report_failed");
+  const available = players.filter((player) => player.available).length;
+  const playing = players.filter((player) => player.isPlaying).length;
+  // Logs deliberately contain neither player ids/names nor credentials.
+  console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
+}
+
 const homeHeaders = { Authorization: `Bearer ${homeAssistantToken}`, "Content-Type": "application/json" };
 const gatewayHeaders = { "Content-Type": "application/json", "X-Hoebbie-Gateway-Key": gatewayKey };
-const musicAssistantUrl = process.env.MUSIC_ASSISTANT_URL?.trim() ?? "";
-const musicAssistantToken = process.env.MUSIC_ASSISTANT_ACCESS_TOKEN?.trim() ?? "";
-const musicAssistant = musicAssistantUrl && musicAssistantToken
-  ? new MusicAssistantClient({ accessToken: musicAssistantToken, baseUrl: musicAssistantUrl })
-  : null;
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const supportedKinds = new Set(["light", "cover", "switch"]);
 const maintenanceSwitch = /(autoplay|gruppierung|hue bridge|sonos|loudness|lautstärke|volume|equalizer|night sound)/i;
 const nonHouseholdEntity = /^(bürostrahler|ess?zimmer überblenden|küche überblenden|erdgeschoss|flur sensor aktiviert|flur lichtsensor aktiviert|wohnzimmer nachtton|wohnzimmer sprachverbesserung|wohnzimmer surround aktiviert|wohnzimmer überblenden)$/i;
+// Meross MSG100 exposes buzzer and do-not-disturb implementation entities next
+// to the actual `cover.*_garage`. They are setup switches, not household
+// controls, and must never be offered to Hoebbie or Alfred.
+const merossGarageMaintenanceEntity = /(?:_dnd$|_buzzerenable$)/i;
 
 function currentPosition(attributes) {
   const value = typeof attributes?.current_position === "number" ? attributes.current_position : Number(attributes?.current_position);
@@ -111,6 +145,12 @@ async function resolvePilotEntityId() {
 
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
+await reportMusicAssistantDiscovery().catch((error) => {
+  const code = error && typeof error === "object" && typeof error.code === "string"
+    ? error.code
+    : "music_assistant.discovery_unavailable";
+  console.error(code);
+});
 
 function discoveredEntity(state, areaNames) {
   if (typeof state?.entity_id !== "string") return null;
@@ -121,7 +161,7 @@ function discoveredEntity(state, areaNames) {
   if (!displayName) return null;
   // Media and bridge-maintenance switches are not household controls. They
   // remain available to a future explicit media/Alfred adapter, never D3 touch.
-  if (nonHouseholdEntity.test(displayName) || (kind === "switch" && maintenanceSwitch.test(displayName))) return null;
+  if (nonHouseholdEntity.test(displayName) || (kind === "switch" && maintenanceSwitch.test(displayName)) || merossGarageMaintenanceEntity.test(state.entity_id)) return null;
   const capabilities = [];
   if (kind === "light") {
     capabilities.push("turn_on", "turn_off");
@@ -145,6 +185,7 @@ function discoveredEntity(state, areaNames) {
     kind,
     position: currentPosition(attributes),
     rgbColor: currentRgbColor(attributes),
+    safetyClass: kind === "cover" && attributes.device_class === "garage" ? "garage" : "standard",
     state: state.state
   };
 }
@@ -281,7 +322,7 @@ async function runMusicOnce() {
   if (!claimed.ok || !validMusicCommand(command)) throw new Error("gateway.music_claim_invalid");
   let completion;
   try {
-    completion = { commandId: command.commandId, mode: "music_complete", observedIsPlaying: await musicAssistant.execute(command), success: true };
+    completion = { commandId: command.commandId, mode: "music_complete", observedIsPlaying: await musicAssistant.setPlayback(command), success: true };
   } catch (error) {
     completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "music_assistant.unexpected_error", mode: "music_complete", success: false };
   }
@@ -292,11 +333,13 @@ async function runMusicOnce() {
 
 let polling = false;
 let nextInventoryAt = 0;
+let nextMusicInventoryAt = 0;
 let inventoryBurstUntil = 0;
 
 async function drainCommands() {
   if (polling) return;
   polling = true;
+  let claimedCommands = 0;
   try {
     // Ein Realtime-Signal enthält nie eine Aktion. Es löst nur die bestehenden,
     // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
@@ -304,15 +347,21 @@ async function drainCommands() {
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const [pilotClaimed, routineClaimed, entityClaimed, musicClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce(), await runMusicOnce()];
       if (!pilotClaimed && !routineClaimed && !entityClaimed && !musicClaimed) break;
+      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed) + Number(musicClaimed);
     }
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
     }
+    if (Date.now() >= nextMusicInventoryAt) {
+      await reportMusicAssistantDiscovery();
+      nextMusicInventoryAt = Date.now() + 60_000;
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
     polling = false;
+    if (claimedCommands > 0) console.info(`gateway.command_claimed:${claimedCommands}`);
   }
 }
 
@@ -327,20 +376,26 @@ let realtimeSocket = null;
 let reconnectTimer = null;
 let refreshTimer = null;
 let heartbeatTimer = null;
+let joinTimer = null;
 let realtimeRef = 0;
+let reconnectDelay = 5_000;
 
 function clearRealtimeTimers() {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (refreshTimer) clearTimeout(refreshTimer);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (joinTimer) clearTimeout(joinTimer);
   reconnectTimer = null;
   refreshTimer = null;
   heartbeatTimer = null;
+  joinTimer = null;
 }
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectRealtime(); }, 60_000);
+  const delay = reconnectDelay;
+  reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectRealtime(); }, delay);
 }
 
 async function connectRealtime() {
@@ -352,14 +407,35 @@ async function connectRealtime() {
     realtimeSocket = socket;
     socket.addEventListener("open", () => {
       const ref = ++realtimeRef;
+      console.info("gateway.realtime_socket_open");
       socket.send(JSON.stringify(joinMessage(topic, session.accessToken, ref)));
+      // A socket without a phx_join reply cannot receive private broadcasts.
+      // Close it explicitly instead of leaving command delivery stalled until
+      // the rare fallback poll happens.
+      joinTimer = setTimeout(() => {
+        console.error("gateway.realtime_join_timeout");
+        socket.close();
+      }, 15_000);
     });
     socket.addEventListener("message", (event) => {
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
-      if (isCommandReady(message, topic)) void drainCommands();
+      if (isCommandReady(message, topic)) {
+        console.info("gateway.realtime_command_ready");
+        void drainCommands();
+      }
+      // This signal contains no device data and only advances the next
+      // read-only inventory report. It never enters a command path.
+      if (isInventoryRefresh(message, topic)) {
+        nextInventoryAt = Date.now();
+        void drainCommands();
+      }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {
+          if (joinTimer) clearTimeout(joinTimer);
+          joinTimer = null;
+          reconnectDelay = 5_000;
+          console.info("gateway.realtime_joined");
           heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
           const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
           refreshTimer = setTimeout(() => socket.close(), delay);
@@ -367,6 +443,8 @@ async function connectRealtime() {
           // only after the private subscription is confirmed.
           void drainCommands();
         } else {
+          if (joinTimer) clearTimeout(joinTimer);
+          joinTimer = null;
           const reason = typeof message[4]?.response?.reason === "string" ? message[4].response.reason : "unknown";
           console.error(`gateway.realtime_join_rejected:${reason}`);
           socket.close();
@@ -379,6 +457,7 @@ async function connectRealtime() {
       if (realtimeSocket !== socket) return;
       clearRealtimeTimers();
       realtimeSocket = null;
+      console.warn("gateway.realtime_closed");
       scheduleReconnect();
     });
   } catch (error) {

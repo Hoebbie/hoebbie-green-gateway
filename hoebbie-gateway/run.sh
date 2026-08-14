@@ -5,12 +5,10 @@ export HOME_ASSISTANT_URL="http://supervisor/core"
 export HOME_ASSISTANT_ACCESS_TOKEN="${SUPERVISOR_TOKEN:?SUPERVISOR_TOKEN ist nicht verfügbar.}"
 export HOEBBIE_GATEWAY_URL="https://rstobkrfiebbmolrglal.supabase.co/functions/v1/home-assistant-pilot"
 
-music_assistant_url="$(bashio::config 'music_assistant_url')"
-music_assistant_access_token="$(bashio::config 'music_assistant_access_token')"
-if [[ -n "${music_assistant_url}" || -n "${music_assistant_access_token}" ]]; then
-  [[ -n "${music_assistant_url}" && -n "${music_assistant_access_token}" ]] || bashio::exit.nok "Music Assistant benötigt Adresse und Zugangsschlüssel gemeinsam."
-  export MUSIC_ASSISTANT_URL="${music_assistant_url}"
-  export MUSIC_ASSISTANT_ACCESS_TOKEN="${music_assistant_access_token}"
-fi
+# Music Assistant stays opt-in until the separate discovery release is enabled.
+# The Supervisor stores the password-valued option redacted for unprivileged
+# callers; it is never printed by this script or the gateway.
+export MUSIC_ASSISTANT_URL="$(bashio::config 'music_assistant_url')"
+export MUSIC_ASSISTANT_ACCESS_TOKEN="$(bashio::config 'music_assistant_access_token')"
 
 exec node /app/gateway.mjs
