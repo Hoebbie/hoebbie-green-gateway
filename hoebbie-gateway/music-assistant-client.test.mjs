@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -51,4 +51,23 @@ test("reports a safe reason when Music Assistant cannot be reached", async () =>
 test("reports a safe HTTP status category without response content", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(null, { status: 404 }));
   await assert.rejects(client.listPlayers(), { code: "music_assistant.api_http_404" });
+});
+
+test("accepts only a verified E3 pause command", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    calls.push(request.command);
+    return new Response(JSON.stringify(request.command === "players/cmd/pause" ? null : {
+      available: true, name: "Küche", player_id: "sonos:kitchen", playback_state: "paused", powered: true
+    }), { status: 200 });
+  });
+  assert.equal(await client.setPlayback({ action: "pause", commandId: "command", playerId: "sonos:kitchen" }), false);
+  assert.deepEqual(calls, ["players/cmd/pause", "players/get"]);
+});
+
+test("rejects every playback command outside E3 before a request", async () => {
+  assert.equal(validMusicCommand({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), false);
+  const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
+  await assert.rejects(client.setPlayback({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), { code: "music_assistant.invalid_command" });
 });

@@ -26,6 +26,14 @@ function playerId(value) {
   return typeof value === "string" && /^[A-Za-z0-9:._/-]{1,200}$/.test(value) ? value : null;
 }
 
+export function validMusicCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.playerId === "string"
+    && playerId(command.playerId)
+    && (command.action === "pause" || command.action === "play"));
+}
+
 function displayName(value) {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -106,5 +114,44 @@ export class MusicAssistantClient {
       players.push(player);
     }
     return players;
+  }
+
+  async setPlayback(command) {
+    if (!validMusicCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Wiedergabeauftrag ist ungültig.");
+    const actionResult = await this.command(command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", { player_id: command.playerId });
+    if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.command_failed", "Music Assistant hat den Wiedergabeauftrag nicht ausgeführt.");
+    const expectedIsPlaying = command.action === "play";
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const player = await this.getPlayer(command.playerId);
+      if (player.isPlaying === expectedIsPlaying) return player.isPlaying;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat den neuen Wiedergabestatus nicht bestätigt.");
+  }
+
+  async command(command, args) {
+    let response;
+    try {
+      response = await this.fetcher(`${this.config.baseUrl}/api`, {
+        body: JSON.stringify({ args, command, message_id: String(++this.#sequence) }),
+        headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" },
+        method: "POST",
+        signal: AbortSignal.timeout(5_000)
+      });
+    } catch {
+      throw new MusicAssistantGatewayError("music_assistant.connection_failed", "Music Assistant ist über die konfigurierte lokale Adresse nicht erreichbar.");
+    }
+    if (!response.ok) return { ok: false, payload: null };
+    return { ok: true, payload: await response.json().catch(() => null) };
+  }
+
+  async getPlayer(id) {
+    const result = await this.command("players/get", { player_id: id });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.state_unavailable", "Music Assistant konnte den Wiedergabestatus nicht bestätigen.");
+    const { payload } = result;
+    const rawPlayer = payload && typeof payload === "object" && !Array.isArray(payload) && "result" in payload ? payload.result : payload;
+    const player = playerFromResponse(rawPlayer);
+    if (!player || player.id !== id) throw new MusicAssistantGatewayError("music_assistant.state_unavailable", "Music Assistant konnte den Wiedergabestatus nicht bestätigen.");
+    return player;
   }
 }

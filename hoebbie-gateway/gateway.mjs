@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, validMusicCommand } from "./music-assistant-client.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -312,6 +312,25 @@ async function runEntityOnce() {
   return true;
 }
 
+async function runMusicOnce() {
+  // Without both locally configured Music Assistant values, music control is
+  // disabled. A claim never carries a free endpoint, token, or command.
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicCommand(command)) throw new Error("gateway.music_claim_invalid");
+  let completion;
+  try {
+    completion = { commandId: command.commandId, mode: "music_complete", observedIsPlaying: await musicAssistant.setPlayback(command), success: true };
+  } catch (error) {
+    completion = { commandId: command.commandId, errorCode: error instanceof Error ? error.message.slice(0, 100) : "music_assistant.unexpected_error", mode: "music_complete", success: false };
+  }
+  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
+  if (!reported.ok) throw new Error("gateway.music_completion_failed");
+  return true;
+}
+
 let polling = false;
 let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
@@ -326,9 +345,9 @@ async function drainCommands() {
     // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
     // mehrere dicht hintereinander eingereihte Aufträge.
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      const [pilotClaimed, routineClaimed, entityClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce()];
-      if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
-      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed);
+      const [pilotClaimed, routineClaimed, entityClaimed, musicClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce(), await runMusicOnce()];
+      if (!pilotClaimed && !routineClaimed && !entityClaimed && !musicClaimed) break;
+      claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed) + Number(musicClaimed);
     }
     if (Date.now() >= nextInventoryAt) {
       await reportInventory();
