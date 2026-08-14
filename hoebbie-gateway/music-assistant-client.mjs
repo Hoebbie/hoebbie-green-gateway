@@ -155,3 +155,44 @@ export class MusicAssistantClient {
     return player;
   }
 }
+
+/**
+ * Keeps the local Music Assistant event stream separate from command handling.
+ * It accepts only player status events and never exposes a free command path.
+ */
+export class MusicAssistantRealtime {
+  constructor(config, onPlayerUpdated) {
+    this.config = validMusicAssistantConfig(config);
+    this.onPlayerUpdated = onPlayerUpdated;
+    this.reconnectTimer = null;
+    this.stopped = false;
+  }
+
+  start() {
+    this.stopped = false;
+    this.connect();
+  }
+
+  stop() {
+    this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.socket?.close();
+  }
+
+  connect() {
+    const url = new URL(this.config.baseUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/ws`;
+    const socket = new WebSocket(url);
+    this.socket = socket;
+    socket.addEventListener("open", () => socket.send(JSON.stringify({ args: { token: this.config.accessToken }, command: "auth", message_id: "hoebbie-green" })));
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message?.event === "player_updated" && message?.data && typeof message.data === "object") this.onPlayerUpdated();
+    });
+    socket.addEventListener("close", () => {
+      if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), 1_000);
+    });
+    socket.addEventListener("error", () => socket.close());
+  }
+}
