@@ -23,7 +23,7 @@ test("uses only the fixed player discovery command", async () => {
 });
 
 test("accepts the current Music Assistant PlayerState response", async () => {
-  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: [{ available: true, name: "Wohnzimmer", player_id: "sonos:RINCON_123", playback_state: "playing", powered: true, volume_level: 42 }] }), { status: 200 }));
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ available: true, name: "Wohnzimmer", player_id: "sonos:RINCON_123", playback_state: "playing", powered: true, volume_level: 42 }]), { status: 200 }));
   assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Wohnzimmer", id: "sonos:RINCON_123", isPlaying: true, powered: true, volume: 42 }]);
 });
 

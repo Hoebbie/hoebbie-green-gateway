@@ -26,6 +26,11 @@ Format (`name`, `playback_state`) als auch die gleichwertigen Feldnamen
 älterer Music-Assistant-Versionen. Es bleibt bei einer reinen, validierten
 Inventarabfrage; es werden keine Player-Befehle gesendet.
 
+Die offizielle HTTP-API liefert das Ergebnis eines Befehls direkt als JSON
+(für `players/all` also eine Liste), während der WebSocket-Protokollrahmen ein
+`result`-Feld verwendet. Der Green akzeptiert ausschließlich diese beiden
+definierten Formen und verarbeitet keine beliebigen Objektantworten.
+
 1. Den Green-Realtime-Lebenszyklus datensparsam protokollierbar machen:
    Anmeldung, Empfang eines rein kategorischen Weckereignisses,
    Wiederverbindung und Claim-Ergebnis. Gerätekennungen, Schlüssel und

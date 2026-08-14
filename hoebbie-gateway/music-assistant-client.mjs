@@ -87,13 +87,21 @@ export class MusicAssistantClient {
     if (!response.ok) {
       throw new MusicAssistantGatewayError(`music_assistant.api_http_${response.status}`, "Music Assistant hat die Zielabfrage nicht angenommen.");
     }
-    const payload = response ? await response.json().catch(() => null) : null;
-    if (!payload || typeof payload !== "object" || !Array.isArray(payload.result)) {
+    const payload = await response.json().catch(() => null);
+    // The HTTP JSON-RPC endpoint returns the command result itself. Keep the
+    // `result` envelope as a compatibility fallback for older test doubles
+    // and WebSocket-style clients, but never accept an arbitrary object.
+    const result = Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === "object" && Array.isArray(payload.result)
+        ? payload.result
+        : null;
+    if (!result) {
       throw new MusicAssistantGatewayError("music_assistant.invalid_response", "Music Assistant hat eine ungültige Zielantwort geliefert.");
     }
     const players = [];
-    for (const result of payload.result) {
-      const player = playerFromResponse(result);
+    for (const item of result) {
+      const player = playerFromResponse(item);
       if (!player) throw new MusicAssistantGatewayError("music_assistant.invalid_response", "Music Assistant hat eine ungültige Zielantwort geliefert.");
       players.push(player);
     }
