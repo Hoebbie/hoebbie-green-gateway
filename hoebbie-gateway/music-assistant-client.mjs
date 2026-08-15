@@ -54,7 +54,8 @@ export function validMusicGroupCommand(command) {
     && command.memberPlayerIds.length <= 8
     && command.memberPlayerIds.every((id) => typeof id === "string" && playerId(id))
     && new Set(command.memberPlayerIds).size === command.memberPlayerIds.length
-    && command.memberPlayerIds.includes(command.leaderPlayerId));
+    && command.memberPlayerIds.includes(command.leaderPlayerId)
+    && (command.operation === undefined || command.operation === "group" || command.operation === "ungroup"));
 }
 
 function displayName(value) {
@@ -181,6 +182,18 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.group_verification_failed", "Music Assistant hat die neue Gruppenzugehörigkeit nicht bestätigt.");
+  }
+
+  async ungroupPlayers(command) {
+    if (!validMusicGroupCommand(command) || command.operation !== "ungroup") throw new MusicAssistantGatewayError("music_assistant.invalid_ungroup_command", "Der freigegebene Auflösungsauftrag ist ungültig.");
+    const actionResult = await this.command("players/cmd/ungroup", { player_id: command.leaderPlayerId });
+    if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.ungroup_command_failed", "Music Assistant hat den Auflösungsauftrag nicht ausgeführt.");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const states = await Promise.all(command.memberPlayerIds.map((id) => this.getPlayer(id)));
+      if (states.every((player) => player.syncedTo !== command.leaderPlayerId) && !states.some((player) => player.id === command.leaderPlayerId && player.groupMembers.length >= 2)) return command.memberPlayerIds;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.ungroup_verification_failed", "Music Assistant hat das Auflösen der Gruppe nicht bestätigt.");
   }
 
   /**

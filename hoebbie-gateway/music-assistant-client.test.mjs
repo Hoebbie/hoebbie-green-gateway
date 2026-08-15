@@ -93,6 +93,21 @@ test("rejects every playback command outside E3 before a request", async () => {
 test("accepts only a bounded group with an explicit leader", () => {
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:living"] }), true);
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"] }), true);
+  assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"], operation: "ungroup" }), true);
+});
+
+test("ungroups only the verified leader and reads every former member", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    calls.push(request);
+    if (request.command === "players/cmd/ungroup") return new Response("null", { status: 200 });
+    const playerId = request.args.player_id;
+    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: "playing", powered: true, synced_to: null, group_members: [] }), { status: 200 });
+  });
+  await client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:living"], operation: "ungroup" });
+  assert.equal(calls[0].command, "players/cmd/ungroup");
+  assert.deepEqual(calls[0].args, { player_id: "sonos:kitchen" });
 });
 
 test("accepts only a verified E4.1 single-player volume command", async () => {

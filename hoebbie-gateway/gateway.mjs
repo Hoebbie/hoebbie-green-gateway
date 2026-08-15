@@ -393,7 +393,7 @@ async function runMusicGroupOnce() {
   if (!claimed.ok || !validMusicGroupCommand(command)) throw new Error("gateway.music_group_claim_invalid");
   let completion;
   try {
-    await withinDeadline(musicAssistant.groupPlayers(command), 12_000, "music_assistant.command_timeout");
+    await withinDeadline(command.operation === "ungroup" ? musicAssistant.ungroupPlayers(command) : musicAssistant.groupPlayers(command), 12_000, "music_assistant.command_timeout");
     completion = { commandId: command.commandId, mode: "music_group_complete", success: true };
   } catch (error) {
     const errorCode = error && typeof error === "object" && typeof error.code === "string" ? error.code : error instanceof Error ? error.message : "music_assistant.unexpected_error";
