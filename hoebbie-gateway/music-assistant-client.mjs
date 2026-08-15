@@ -54,7 +54,7 @@ export function validMusicGroupCommand(command) {
     && command.memberPlayerIds.length <= 8
     && command.memberPlayerIds.every((id) => typeof id === "string" && playerId(id))
     && new Set(command.memberPlayerIds).size === command.memberPlayerIds.length
-    && command.memberPlayerIds[0] === command.leaderPlayerId);
+    && command.memberPlayerIds.includes(command.leaderPlayerId));
 }
 
 function displayName(value) {
@@ -169,15 +169,15 @@ export class MusicAssistantClient {
 
   async groupPlayers(command) {
     if (!validMusicGroupCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_group_command", "Der freigegebene Gruppenauftrag ist ungültig.");
-    const followers = command.memberPlayerIds.slice(1);
+    const followers = command.memberPlayerIds.filter((id) => id !== command.leaderPlayerId);
     for (const playerId of followers) {
       const actionResult = await this.command("players/cmd/group", { player_id: playerId, target_player: command.leaderPlayerId });
       if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.group_command_failed", "Music Assistant hat den Gruppenauftrag nicht ausgeführt.");
     }
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const states = await Promise.all(command.memberPlayerIds.map((id) => this.getPlayer(id)));
-      const leader = states[0];
-      if (states.slice(1).every((player) => player.syncedTo === command.leaderPlayerId) && (leader.groupMembers.length === 0 || followers.every((id) => leader.groupMembers.includes(id)))) return command.memberPlayerIds;
+      const leader = states.find((player) => player.id === command.leaderPlayerId);
+      if (leader && states.filter((player) => player.id !== command.leaderPlayerId).every((player) => player.syncedTo === command.leaderPlayerId) && (leader.groupMembers.length === 0 || followers.every((id) => leader.groupMembers.includes(id)))) return command.memberPlayerIds;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.group_verification_failed", "Music Assistant hat die neue Gruppenzugehörigkeit nicht bestätigt.");

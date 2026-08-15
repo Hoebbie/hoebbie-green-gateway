@@ -92,7 +92,7 @@ test("rejects every playback command outside E3 before a request", async () => {
 
 test("accepts only a bounded group with an explicit leader", () => {
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:living"] }), true);
-  assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"] }), false);
+  assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"] }), true);
 });
 
 test("accepts only a verified E4.1 single-player volume command", async () => {
