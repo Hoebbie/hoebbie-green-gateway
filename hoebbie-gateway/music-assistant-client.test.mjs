@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -16,7 +16,7 @@ test("uses only the fixed player discovery command", async () => {
     calls.push({ options, url });
     return new Response(JSON.stringify({ result: [{ available: true, display_name: "Küche", player_id: "sonos:kitchen", powered: true, state: "playing", volume_level: 38 }] }), { status: 200 });
   });
-  assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Küche", id: "sonos:kitchen", isPlaying: true, powered: true, volume: 38 }]);
+  assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Küche", groupMembers: [], id: "sonos:kitchen", isPlaying: true, powered: true, syncedTo: null, volume: 38 }]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "http://music-assistant.local:8095/api");
   assert.deepEqual(JSON.parse(calls[0].options.body), { args: {}, command: "players/all", message_id: "1" });
@@ -24,7 +24,7 @@ test("uses only the fixed player discovery command", async () => {
 
 test("accepts the current Music Assistant PlayerState response", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ available: true, name: "Wohnzimmer", player_id: "sonos:RINCON_123", playback_state: "playing", powered: true, volume_level: 42 }]), { status: 200 }));
-  assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Wohnzimmer", id: "sonos:RINCON_123", isPlaying: true, powered: true, volume: 42 }]);
+  assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Wohnzimmer", groupMembers: [], id: "sonos:RINCON_123", isPlaying: true, powered: true, syncedTo: null, volume: 42 }]);
 });
 
 test("rejects malformed players instead of guessing a target", async () => {
@@ -88,6 +88,11 @@ test("rejects every playback command outside E3 before a request", async () => {
   assert.equal(validMusicCommand({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), false);
   const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
   await assert.rejects(client.setPlayback({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), { code: "music_assistant.invalid_command" });
+});
+
+test("accepts only a bounded group with an explicit leader", () => {
+  assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:living"] }), true);
+  assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"] }), false);
 });
 
 test("accepts only a verified E4.1 single-player volume command", async () => {

@@ -44,6 +44,19 @@ export function validMusicVolumeCommand(command) {
     && command.targetVolume <= 100);
 }
 
+export function validMusicGroupCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.leaderPlayerId === "string"
+    && playerId(command.leaderPlayerId)
+    && Array.isArray(command.memberPlayerIds)
+    && command.memberPlayerIds.length >= 2
+    && command.memberPlayerIds.length <= 8
+    && command.memberPlayerIds.every((id) => typeof id === "string" && playerId(id))
+    && new Set(command.memberPlayerIds).size === command.memberPlayerIds.length
+    && command.memberPlayerIds[0] === command.leaderPlayerId);
+}
+
 function displayName(value) {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -63,7 +76,10 @@ function playerFromResponse(value) {
   const volume = typeof value.volume_level === "number" && Number.isFinite(value.volume_level) && value.volume_level >= 0 && value.volume_level <= 100
     ? Math.round(value.volume_level)
     : null;
-  return { available: value.available, displayName: name, id, isPlaying: state === "PLAYING", powered: value.powered, volume };
+  const syncedTo = playerId(value.synced_to);
+  const groupMembers = Array.isArray(value.group_members) && value.group_members.every((member) => typeof member === "string" && playerId(member))
+    ? value.group_members : [];
+  return { available: value.available, displayName: name, groupMembers, id, isPlaying: state === "PLAYING", powered: value.powered, syncedTo, volume };
 }
 
 export function validMusicAssistantConfig(config) {
@@ -149,6 +165,22 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat die neue Lautstärke nicht bestätigt.");
+  }
+
+  async groupPlayers(command) {
+    if (!validMusicGroupCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_group_command", "Der freigegebene Gruppenauftrag ist ungültig.");
+    const followers = command.memberPlayerIds.slice(1);
+    for (const playerId of followers) {
+      const actionResult = await this.command("players/cmd/group", { player_id: playerId, target_player: command.leaderPlayerId });
+      if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.group_command_failed", "Music Assistant hat den Gruppenauftrag nicht ausgeführt.");
+    }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const states = await Promise.all(command.memberPlayerIds.map((id) => this.getPlayer(id)));
+      const leader = states[0];
+      if (states.slice(1).every((player) => player.syncedTo === command.leaderPlayerId) && (leader.groupMembers.length === 0 || followers.every((id) => leader.groupMembers.includes(id)))) return command.memberPlayerIds;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.group_verification_failed", "Music Assistant hat die neue Gruppenzugehörigkeit nicht bestätigt.");
   }
 
   /**
