@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -70,4 +70,24 @@ test("rejects every playback command outside E3 before a request", async () => {
   assert.equal(validMusicCommand({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), false);
   const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
   await assert.rejects(client.setPlayback({ action: "volume", commandId: "command", playerId: "sonos:kitchen" }), { code: "music_assistant.invalid_command" });
+});
+
+test("accepts only a verified E4.1 single-player volume command", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    calls.push(request);
+    return new Response(JSON.stringify(request.command === "players/cmd/volume_set" ? null : {
+      available: true, name: "Küche", player_id: "sonos:kitchen", playback_state: "playing", powered: true, volume_level: 43
+    }), { status: 200 });
+  });
+  assert.equal(await client.setVolume({ commandId: "command", playerId: "sonos:kitchen", targetVolume: 43 }), 43);
+  assert.deepEqual(calls.map((call) => call.command), ["players/cmd/volume_set", "players/get"]);
+  assert.deepEqual(calls[0].args, { player_id: "sonos:kitchen", volume_level: 43 });
+});
+
+test("rejects an unsafe volume command before a request", async () => {
+  assert.equal(validMusicVolumeCommand({ commandId: "command", playerId: "sonos:kitchen", targetVolume: 101 }), false);
+  const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
+  await assert.rejects(client.setVolume({ commandId: "command", playerId: "sonos:kitchen", targetVolume: -1 }), { code: "music_assistant.invalid_command" });
 });

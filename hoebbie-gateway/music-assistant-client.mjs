@@ -34,6 +34,16 @@ export function validMusicCommand(command) {
     && (command.action === "pause" || command.action === "play"));
 }
 
+export function validMusicVolumeCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.playerId === "string"
+    && playerId(command.playerId)
+    && Number.isInteger(command.targetVolume)
+    && command.targetVolume >= 0
+    && command.targetVolume <= 100);
+}
+
 function displayName(value) {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -127,6 +137,18 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat den neuen Wiedergabestatus nicht bestätigt.");
+  }
+
+  async setVolume(command) {
+    if (!validMusicVolumeCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Lautstärkeauftrag ist ungültig.");
+    const actionResult = await this.command("players/cmd/volume_set", { player_id: command.playerId, volume_level: command.targetVolume });
+    if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.command_failed", "Music Assistant hat den Lautstärkeauftrag nicht ausgeführt.");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const player = await this.getPlayer(command.playerId);
+      if (player.volume === command.targetVolume) return player.volume;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat die neue Lautstärke nicht bestätigt.");
   }
 
   async command(command, args) {
