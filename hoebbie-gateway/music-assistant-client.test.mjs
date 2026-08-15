@@ -53,6 +53,24 @@ test("reports a safe HTTP status category without response content", async () =>
   await assert.rejects(client.listPlayers(), { code: "music_assistant.api_http_404" });
 });
 
+test("reads only local API documentation for E4.2 group feasibility", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (url, options) => {
+    calls.push({ options, url });
+    return new Response("players/cmd/group players/cmd/ungroup", { status: 200 });
+  });
+  assert.deepEqual(await client.groupCapabilities(), { group: true, setMembers: false, ungroup: true });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "http://music-assistant.local:8095/api-docs");
+  assert.equal(calls[0].options.method, "GET");
+  assert.equal(calls[0].options.headers.Authorization, `Bearer ${config.accessToken}`);
+});
+
+test("does not interpret an unavailable API document as a group capability", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(null, { status: 404 }));
+  await assert.rejects(client.groupCapabilities(), { code: "music_assistant.api_docs_http_404" });
+});
+
 test("accepts only a verified E3 pause command", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {

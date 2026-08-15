@@ -151,6 +151,39 @@ export class MusicAssistantClient {
     throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat die neue Lautstärke nicht bestätigt.");
   }
 
+  /**
+   * Reads only Music Assistant's local API documentation. The returned fixed
+   * booleans decide whether E4.2 may be implemented; no player command is
+   * issued and the document never leaves the Green gateway.
+   */
+  async groupCapabilities() {
+    let response;
+    try {
+      response = await this.fetcher(`${this.config.baseUrl}/api-docs`, {
+        headers: { Authorization: `Bearer ${this.config.accessToken}` },
+        method: "GET",
+        signal: AbortSignal.timeout(5_000)
+      });
+    } catch {
+      throw new MusicAssistantGatewayError("music_assistant.api_docs_unavailable", "Die lokale Music-Assistant-API-Dokumentation ist nicht erreichbar.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new MusicAssistantGatewayError("music_assistant.authentication_failed", "Der Music-Assistant-Zugang wurde abgelehnt.");
+    }
+    if (!response.ok) {
+      throw new MusicAssistantGatewayError(`music_assistant.api_docs_http_${response.status}`, "Die lokale Music-Assistant-API-Dokumentation ist nicht erreichbar.");
+    }
+    const document = await response.text().catch(() => "");
+    if (!document || document.length > 1_000_000) {
+      throw new MusicAssistantGatewayError("music_assistant.api_docs_invalid", "Die lokale Music-Assistant-API-Dokumentation ist ungültig.");
+    }
+    return {
+      group: document.includes("players/cmd/group"),
+      setMembers: document.includes("players/cmd/set_members"),
+      ungroup: document.includes("players/cmd/ungroup")
+    };
+  }
+
   async command(command, args) {
     let response;
     try {
