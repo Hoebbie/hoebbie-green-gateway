@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
@@ -413,6 +413,26 @@ async function runMusicGroupOnce() {
   return true;
 }
 
+async function runMusicProfileTransferOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_transfer_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicQueueTransferCommand(command)) throw new Error("gateway.music_profile_transfer_claim_invalid");
+  let completion;
+  try {
+    await withinDeadline(musicAssistant.transferQueue(command), 12_000, "music_assistant.queue_transfer_timeout");
+    completion = { commandId: command.commandId, mode: "music_profile_transfer_complete", success: true };
+  } catch (error) {
+    const errorCode = error && typeof error === "object" && typeof error.code === "string" ? error.code : error instanceof Error ? error.message : "music_assistant.unexpected_error";
+    completion = { commandId: command.commandId, errorCode: errorCode.slice(0, 100), mode: "music_profile_transfer_complete", success: false };
+  }
+  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
+  if (!reported.ok) throw new Error("gateway.music_profile_transfer_completion_failed");
+  await reportMusicAssistantDiscovery();
+  return true;
+}
+
 let polling = false;
 let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
@@ -429,6 +449,12 @@ const musicVolumeCommandDrain = new BoundedQueueDrain({
   onClaimed: (count) => console.info(`gateway.music_volume_command_claimed:${count}`),
   onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"),
   onLimit: () => console.error("Der Music-Assistant-Gateway hat die Lautstärke-Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
+});
+const musicProfileTransferCommandDrain = new BoundedQueueDrain({
+  claimOnce: runMusicProfileTransferOnce,
+  onClaimed: (count) => console.info(`gateway.music_profile_transfer_claimed:${count}`),
+  onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"),
+  onLimit: () => console.error("Der Music-Assistant-Gateway hat die Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
 });
 const musicGroupCommandDrain = new BoundedQueueDrain({
   claimOnce: runMusicGroupOnce,
@@ -471,6 +497,7 @@ function drainCommands() {
   // routine or inventory request and cannot keep those queues locked either.
   void musicCommandDrain.request();
   void musicVolumeCommandDrain.request();
+  void musicProfileTransferCommandDrain.request();
   void musicGroupCommandDrain.request();
   void drainDeviceCommands();
 }
