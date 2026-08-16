@@ -79,6 +79,11 @@ async function reportMusicAssistantDiscovery() {
     })
   });
   if (!reported.ok) throw new Error("gateway.music_inventory_report_failed");
+  const snapshot = await musicAssistant.activeQueueSnapshot();
+  if (snapshot) {
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, progressSeconds: snapshot.progressSeconds, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
+    if (!sessionReported.ok) throw new Error("gateway.music_profile_snapshot_report_failed");
+  }
   const available = players.filter((player) => player.available).length;
   const playing = players.filter((player) => player.isPlaying).length;
   // Logs deliberately contain neither player ids/names nor credentials.
