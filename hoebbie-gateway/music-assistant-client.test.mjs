@@ -91,17 +91,34 @@ test("normalizes only the active queue snapshot", async () => {
   assert.deepEqual(await client.activeQueueSnapshot(), { album: "Album", artist: "Künstler", durationSeconds: 240, isPlaying: true, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
 });
 
+test("reads a paused target queue without treating it as playing", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "paused" }]), { status: 200 }));
+  assert.deepEqual(await client.queueSnapshot("sonos:kitchen"), { album: null, artist: null, durationSeconds: 240, isPlaying: false, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+});
+
 test("transfers only a bounded queue and confirms its target", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {
     const request = JSON.parse(options.body); calls.push(request);
     if (request.command === "player_queues/transfer") return new Response("null", { status: 200 });
     if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:dining", state: "playing" }]), { status: 200 });
-    return new Response(JSON.stringify({ available: true, name: "Esszimmer", player_id: "sonos:dining", playback_state: "playing", powered: true }), { status: 200 });
+    return new Response(JSON.stringify({ available: true, name: "Esszimmer", player_id: request.args.player_id, playback_state: "playing", powered: true }), { status: 200 });
   });
   assert.equal((await client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:dining" })).sourcePlayerId, "sonos:dining");
-  assert.deepEqual(calls.map((call) => call.command), ["players/get", "player_queues/transfer", "player_queues/all", "players/get"]);
-  assert.deepEqual(calls[1], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "2" });
+  assert.deepEqual(calls.map((call) => call.command), ["players/get", "players/get", "player_queues/transfer", "player_queues/all", "players/get"]);
+  assert.deepEqual(calls[2], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "3" });
+});
+
+test("keeps a paused source paused when transferring its queue", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "player_queues/transfer") return new Response("null", { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:dining", state: "paused" }]), { status: 200 });
+    return new Response(JSON.stringify({ available: true, name: request.args.player_id, player_id: request.args.player_id, playback_state: "paused", powered: true }), { status: 200 });
+  });
+  await client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:dining" });
+  assert.equal(calls.find((call) => call.command === "player_queues/transfer").args.auto_play, false);
 });
 
 test("does not transfer to a target that is currently unavailable", async () => {

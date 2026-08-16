@@ -170,20 +170,30 @@ export class MusicAssistantClient {
     return true;
   }
 
-  /** Returns only a normalized active queue snapshot for later E4.6 server
-   * synchronization. It never logs or exposes the full queue. */
-  async activeQueueSnapshot() {
+  /** Returns only a normalized queue snapshot for a fixed player. It never
+   * logs or exposes the full queue. */
+  async queueSnapshot(playerIdToRead) {
+    if (!playerId(playerIdToRead)) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige Queue geliefert.");
     const result = await this.command("player_queues/all", {});
     const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
     if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
-    const queue = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING") ?? null;
+    const queue = queues.find((item) => item && typeof item === "object" && playerId(item.queue_id) === playerIdToRead) ?? null;
     if (!queue) return null;
     const current = queue.current_item && typeof queue.current_item === "object" ? queue.current_item : {};
     const text = (value) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
     const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
     const sourcePlayerId = playerId(queue.queue_id);
     if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
-    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), durationSeconds: seconds(current.duration), isPlaying: true, progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
+    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
+  }
+
+  async activeQueueSnapshot() {
+    const result = await this.command("player_queues/all", {});
+    const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
+    if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
+    const active = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING");
+    const activeId = active && typeof active === "object" ? playerId(active.queue_id) : null;
+    return activeId ? this.queueSnapshot(activeId) : null;
   }
 
   /** Executes only the fixed, server-authorized queue transfer and confirms
@@ -197,12 +207,14 @@ export class MusicAssistantClient {
     if (!targetBeforeTransfer.available) {
       throw new MusicAssistantGatewayError("music_assistant.queue_transfer_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
     }
-    const result = await this.command("player_queues/transfer", { auto_play: true, source_queue_id: command.sourcePlayerId, target_queue_id: command.targetPlayerId });
+    const sourceBeforeTransfer = await this.getPlayer(command.sourcePlayerId);
+    if (!sourceBeforeTransfer.available) throw new MusicAssistantGatewayError("music_assistant.queue_transfer_source_unavailable", "Der bisherige Raum ist momentan nicht erreichbar.");
+    const result = await this.command("player_queues/transfer", { auto_play: sourceBeforeTransfer.isPlaying, source_queue_id: command.sourcePlayerId, target_queue_id: command.targetPlayerId });
     if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.queue_transfer_failed", "Music Assistant hat den Raumwechsel nicht ausgeführt.");
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const snapshot = await this.activeQueueSnapshot();
+      const snapshot = await this.queueSnapshot(command.targetPlayerId);
       const target = await this.getPlayer(command.targetPlayerId);
-      if (snapshot?.sourcePlayerId === command.targetPlayerId && target.available) return snapshot;
+      if (snapshot?.sourcePlayerId === command.targetPlayerId && target.available && target.isPlaying === sourceBeforeTransfer.isPlaying && snapshot.isPlaying === sourceBeforeTransfer.isPlaying) return snapshot;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.queue_transfer_verification_failed", "Music Assistant hat den Raumwechsel nicht bestätigt.");
