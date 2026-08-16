@@ -71,6 +71,21 @@ test("does not interpret an unavailable API document as a group capability", asy
   await assert.rejects(client.groupCapabilities(), { code: "music_assistant.api_docs_http_404" });
 });
 
+test("reads the fixed queue registry without exposing queue contents", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return new Response(JSON.stringify([{ queue_id: "sonos:kitchen" }]), { status: 200 });
+  });
+  assert.equal(await client.queueRegistryAvailable(), true);
+  assert.deepEqual(calls, [{ args: {}, command: "player_queues/all", message_id: "1" }]);
+});
+
+test("rejects malformed queue registry responses", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ queue_id: "not-an-array" }), { status: 200 }));
+  await assert.rejects(client.queueRegistryAvailable(), { code: "music_assistant.queue_registry_invalid" });
+});
+
 test("accepts only a verified E3 pause command", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {

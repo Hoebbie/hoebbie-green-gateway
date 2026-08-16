@@ -143,6 +143,23 @@ export class MusicAssistantClient {
     return players;
   }
 
+  /**
+   * Reads the current Music Assistant queue registry through its fixed API
+   * command. Queue entries themselves deliberately never leave the Green
+   * gateway: this is only a capability/health probe for E4.6.
+   */
+  async queueRegistryAvailable() {
+    const result = await this.command("player_queues/all", {});
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
+    const payload = Array.isArray(result.payload)
+      ? result.payload
+      : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result)
+        ? result.payload.result
+        : null;
+    if (!payload) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige Queue-Übersicht geliefert.");
+    return true;
+  }
+
   async setPlayback(command) {
     if (!validMusicCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Wiedergabeauftrag ist ungültig.");
     const actionResult = await this.command(command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", { player_id: command.playerId });

@@ -48,9 +48,12 @@ console.log(`Hoebbie-Gateway-Prüfwert für die einmalige Kopplung: ${gatewayKey
 async function reportMusicAssistantGroupCapabilities() {
   if (!musicAssistant) return;
   const capabilities = await musicAssistant.groupCapabilities();
-  // Only fixed booleans are logged: no URL, token, player identity, or API
-  // document is persisted. This is a read-only E4.2 feasibility probe.
-  console.info(`music_assistant.group_capability:group=${capabilities.group},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  // These booleans describe only the generated documentation shell. They are
+  // never treated as a feature decision because MA's HTML can omit commands.
+  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  const queueRegistryAvailable = await musicAssistant.queueRegistryAvailable();
+  // No queue, title, media id or player identifier is logged or persisted.
+  console.info(`music_assistant.queue_registry_readable=${queueRegistryAvailable}`);
 }
 
 void reportMusicAssistantGroupCapabilities().catch((error) => console.error(error instanceof Error && typeof error.code === "string" ? error.code : "music_assistant.group_capability_failed"));
