@@ -100,7 +100,21 @@ test("transfers only a bounded queue and confirms its target", async () => {
     return new Response(JSON.stringify({ available: true, name: "Esszimmer", player_id: "sonos:dining", playback_state: "playing", powered: true }), { status: 200 });
   });
   assert.equal((await client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:dining" })).sourcePlayerId, "sonos:dining");
-  assert.deepEqual(calls[0], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "1" });
+  assert.deepEqual(calls.map((call) => call.command), ["players/get", "player_queues/transfer", "player_queues/all", "players/get"]);
+  assert.deepEqual(calls[1], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "2" });
+});
+
+test("does not transfer to a target that is currently unavailable", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request.command);
+    return new Response(JSON.stringify({ available: false, name: "Küche", player_id: "sonos:kitchen", playback_state: "idle", powered: false }), { status: 200 });
+  });
+  await assert.rejects(
+    client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:dining", targetPlayerId: "sonos:kitchen" }),
+    { code: "music_assistant.queue_transfer_target_unavailable" }
+  );
+  assert.deepEqual(calls, ["players/get"]);
 });
 
 test("rejects a same-room or malformed queue transfer before a request", () => {

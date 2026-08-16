@@ -190,6 +190,13 @@ export class MusicAssistantClient {
    * that the active queue now belongs to the intended target player. */
   async transferQueue(command) {
     if (!validMusicQueueTransferCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_queue_transfer", "Der freigegebene Raumwechsel ist ungültig.");
+    // Database discovery is intentionally not the authority for a dynamic
+    // availability decision: a Sonos player may reappear between inventory
+    // scans. Verify the fixed target directly before issuing the transfer.
+    const targetBeforeTransfer = await this.getPlayer(command.targetPlayerId);
+    if (!targetBeforeTransfer.available) {
+      throw new MusicAssistantGatewayError("music_assistant.queue_transfer_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
+    }
     const result = await this.command("player_queues/transfer", { auto_play: true, source_queue_id: command.sourcePlayerId, target_queue_id: command.targetPlayerId });
     if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.queue_transfer_failed", "Music Assistant hat den Raumwechsel nicht ausgeführt.");
     for (let attempt = 0; attempt < 5; attempt += 1) {
