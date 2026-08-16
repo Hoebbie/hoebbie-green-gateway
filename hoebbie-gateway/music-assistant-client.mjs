@@ -160,6 +160,22 @@ export class MusicAssistantClient {
     return true;
   }
 
+  /** Returns only a normalized active queue snapshot for later E4.6 server
+   * synchronization. It never logs or exposes the full queue. */
+  async activeQueueSnapshot() {
+    const result = await this.command("player_queues/all", {});
+    const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
+    if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
+    const queue = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING") ?? null;
+    if (!queue) return null;
+    const current = queue.current_item && typeof queue.current_item === "object" ? queue.current_item : {};
+    const text = (value) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
+    const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+    const sourcePlayerId = playerId(queue.queue_id);
+    if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
+    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), durationSeconds: seconds(current.duration), isPlaying: true, progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
+  }
+
   async setPlayback(command) {
     if (!validMusicCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Wiedergabeauftrag ist ungültig.");
     const actionResult = await this.command(command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", { player_id: command.playerId });

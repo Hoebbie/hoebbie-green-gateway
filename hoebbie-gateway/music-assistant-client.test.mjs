@@ -86,6 +86,11 @@ test("rejects malformed queue registry responses", async () => {
   await assert.rejects(client.queueRegistryAvailable(), { code: "music_assistant.queue_registry_invalid" });
 });
 
+test("normalizes only the active queue snapshot", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
+  assert.deepEqual(await client.activeQueueSnapshot(), { album: "Album", artist: "Künstler", durationSeconds: 240, isPlaying: true, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+});
+
 test("accepts only a verified E3 pause command", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {
