@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -89,6 +89,22 @@ test("rejects malformed queue registry responses", async () => {
 test("normalizes only the active queue snapshot", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
   assert.deepEqual(await client.activeQueueSnapshot(), { album: "Album", artist: "Künstler", durationSeconds: 240, isPlaying: true, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+});
+
+test("transfers only a bounded queue and confirms its target", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "player_queues/transfer") return new Response("null", { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:dining", state: "playing" }]), { status: 200 });
+    return new Response(JSON.stringify({ available: true, name: "Esszimmer", player_id: "sonos:dining", playback_state: "playing", powered: true }), { status: 200 });
+  });
+  assert.equal((await client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:dining" })).sourcePlayerId, "sonos:dining");
+  assert.deepEqual(calls[0], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "1" });
+});
+
+test("rejects a same-room or malformed queue transfer before a request", () => {
+  assert.equal(validMusicQueueTransferCommand({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:kitchen" }), false);
 });
 
 test("accepts only a verified E3 pause command", async () => {
