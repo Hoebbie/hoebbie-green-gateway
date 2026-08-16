@@ -224,6 +224,8 @@ export class MusicAssistantClient {
     }
     return {
       group: document.includes("players/cmd/group"),
+      queueGet: document.includes("player_queues/get"),
+      queueTransfer: document.includes("player_queues/transfer"),
       setMembers: document.includes("players/cmd/set_members"),
       ungroup: document.includes("players/cmd/ungroup")
     };

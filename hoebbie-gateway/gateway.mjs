@@ -50,7 +50,7 @@ async function reportMusicAssistantGroupCapabilities() {
   const capabilities = await musicAssistant.groupCapabilities();
   // Only fixed booleans are logged: no URL, token, player identity, or API
   // document is persisted. This is a read-only E4.2 feasibility probe.
-  console.info(`music_assistant.group_capability:group=${capabilities.group},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  console.info(`music_assistant.group_capability:group=${capabilities.group},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
 }
 
 void reportMusicAssistantGroupCapabilities().catch((error) => console.error(error instanceof Error && typeof error.code === "string" ? error.code : "music_assistant.group_capability_failed"));

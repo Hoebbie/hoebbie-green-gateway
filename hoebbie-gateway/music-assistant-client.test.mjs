@@ -57,9 +57,9 @@ test("reads only local API documentation for E4.2 group feasibility", async () =
   const calls = [];
   const client = new MusicAssistantClient(config, async (url, options) => {
     calls.push({ options, url });
-    return new Response("players/cmd/group players/cmd/ungroup", { status: 200 });
+    return new Response("players/cmd/group players/cmd/ungroup player_queues/get player_queues/transfer", { status: 200 });
   });
-  assert.deepEqual(await client.groupCapabilities(), { group: true, setMembers: false, ungroup: true });
+  assert.deepEqual(await client.groupCapabilities(), { group: true, queueGet: true, queueTransfer: true, setMembers: false, ungroup: true });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "http://music-assistant.local:8095/api-docs");
   assert.equal(calls[0].options.method, "GET");
