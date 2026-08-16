@@ -74,7 +74,7 @@ async function reportMusicAssistantDiscovery() {
         playerId: player.id,
         powered: player.powered,
         syncedTo: player.syncedTo,
-        volume: player.volume
+        ...(player.volume === null ? {} : { volume: player.volume })
       }))
     })
   });
