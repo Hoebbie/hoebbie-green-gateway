@@ -78,7 +78,7 @@ async function reportMusicAssistantDiscovery() {
       }))
     })
   });
-  if (!reported.ok) throw new Error("gateway.music_inventory_report_failed");
+  if (!reported.ok) throw new Error(`gateway.music_inventory_report_failed:${reported.status}`);
   const snapshot = await musicAssistant.activeQueueSnapshot();
   if (snapshot) {
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, progressSeconds: snapshot.progressSeconds, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
