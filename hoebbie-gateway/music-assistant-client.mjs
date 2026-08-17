@@ -74,6 +74,22 @@ function displayName(value) {
   return normalized.length >= 1 && normalized.length <= 120 ? normalized : null;
 }
 
+/** A queue can contain artwork from many Music Assistant providers. The
+ * profile snapshot carries only Spotify's public CDN image, never an MA path,
+ * an authenticated URL, or a provider token. */
+function spotifyArtworkRef(value) {
+  if (typeof value !== "string" || value.length > 500) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "i.scdn.co" && !url.username && !url.password
+      && !url.port && !url.search && !url.hash && /^\/image\/[A-Za-z0-9]{20,100}$/.test(url.pathname)
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function playerFromResponse(value) {
   if (!value || typeof value !== "object") return null;
   const id = playerId(value.player_id);
@@ -184,7 +200,15 @@ export class MusicAssistantClient {
     const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
     const sourcePlayerId = playerId(queue.queue_id);
     if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
-    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
+    const artworkCandidates = [
+      current.image?.path,
+      current.image?.url,
+      current.album?.images?.[0]?.url,
+      current.album?.image?.path,
+      current.album?.image?.url
+    ];
+    const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
+    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
   }
 
   async activeQueueSnapshot() {

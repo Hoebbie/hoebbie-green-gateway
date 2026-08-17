@@ -86,14 +86,19 @@ test("rejects malformed queue registry responses", async () => {
   await assert.rejects(client.queueRegistryAvailable(), { code: "music_assistant.queue_registry_invalid" });
 });
 
-test("normalizes only the active queue snapshot", async () => {
-  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
-  assert.deepEqual(await client.activeQueueSnapshot(), { album: "Album", artist: "Künstler", durationSeconds: 240, isPlaying: true, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+test("normalizes only the active queue snapshot and keeps a public Spotify cover", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
+  assert.deepEqual(await client.activeQueueSnapshot(), { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+});
+
+test("does not expose local or credentialed artwork paths", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { image: { path: "http://music-assistant.local:8095/image/private" }, duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
+  assert.equal((await client.activeQueueSnapshot()).artworkRef, null);
 });
 
 test("reads a paused target queue without treating it as playing", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "paused" }]), { status: 200 }));
-  assert.deepEqual(await client.queueSnapshot("sonos:kitchen"), { album: null, artist: null, durationSeconds: 240, isPlaying: false, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
+  assert.deepEqual(await client.queueSnapshot("sonos:kitchen"), { album: null, artist: null, artworkRef: null, durationSeconds: 240, isPlaying: false, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", title: "Titel" });
 });
 
 test("transfers only a bounded queue and confirms its target", async () => {
