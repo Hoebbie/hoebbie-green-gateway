@@ -85,7 +85,7 @@ async function reportMusicAssistantDiscovery() {
   }
   const snapshot = await musicAssistant.activeQueueSnapshot();
   if (snapshot) {
-    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, progressSeconds: snapshot.progressSeconds, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error("gateway.music_profile_snapshot_report_failed");
   }
   const available = players.filter((player) => player.available).length;
@@ -432,8 +432,8 @@ async function runMusicProfileTransferOnce() {
   if (!claimed.ok || !validMusicQueueTransferCommand(command)) throw new Error("gateway.music_profile_transfer_claim_invalid");
   let completion;
   try {
-    await withinDeadline(musicAssistant.transferQueue(command), 12_000, "music_assistant.queue_transfer_timeout");
-    completion = { commandId: command.commandId, mode: "music_profile_transfer_complete", success: true };
+    const snapshot = await withinDeadline(musicAssistant.transferQueue(command), 12_000, "music_assistant.queue_transfer_timeout");
+    completion = { commandId: command.commandId, mode: "music_profile_transfer_complete", snapshot, success: true };
   } catch (error) {
     const errorCode = error && typeof error === "object" && typeof error.code === "string" ? error.code : error instanceof Error ? error.message : "music_assistant.unexpected_error";
     completion = { commandId: command.commandId, errorCode: errorCode.slice(0, 100), mode: "music_profile_transfer_complete", success: false };

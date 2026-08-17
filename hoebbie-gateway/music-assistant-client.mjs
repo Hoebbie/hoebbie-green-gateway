@@ -221,6 +221,13 @@ export class MusicAssistantClient {
     const current = queue.current_item && typeof queue.current_item === "object" ? queue.current_item : {};
     const text = (value) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
     const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
+    // Music Assistant exposes the queue clock as epoch seconds. Keep it as an
+    // explicit source time; the mobile app must not derive it from event gaps.
+    const sourceTime = (value) => {
+      if (typeof value === "number" && Number.isFinite(value) && value > 0) return new Date(value * 1_000).toISOString();
+      if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+      return null;
+    };
     const sourcePlayerId = playerId(queue.queue_id);
     if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
     const artworkCandidates = [
@@ -231,7 +238,7 @@ export class MusicAssistantClient {
       current.album?.image?.url
     ];
     const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
-    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, title: text(current.name ?? current.title) };
+    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", observedAt: new Date().toISOString(), progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, sourceTime: sourceTime(queue.elapsed_time_last_updated), title: text(current.name ?? current.title) };
   }
 
   async activeQueueSnapshot() {
