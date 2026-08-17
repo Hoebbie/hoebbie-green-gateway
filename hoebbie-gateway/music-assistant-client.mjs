@@ -68,6 +68,21 @@ export function validMusicQueueTransferCommand(command) {
     && command.sourcePlayerId !== command.targetPlayerId);
 }
 
+/** The contract probe accepts only documented Music Assistant state events.
+ * Their payload never leaves the local gateway and is deliberately not logged. */
+export function musicAssistantRealtimeEvent(message) {
+  if (!message || typeof message !== "object") return null;
+  if (message.event === "queue_time_updated") {
+    return typeof message.data === "number" && Number.isFinite(message.data) && message.data >= 0
+      ? message.event
+      : null;
+  }
+  return ["player_updated", "queue_updated", "queue_items_updated"].includes(message.event)
+    && message.data && typeof message.data === "object"
+    ? message.event
+    : null;
+}
+
 function displayName(value) {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -364,9 +379,9 @@ export class MusicAssistantClient {
  * It accepts only player status events and never exposes a free command path.
  */
 export class MusicAssistantRealtime {
-  constructor(config, onPlayerUpdated) {
+  constructor(config, onEvent) {
     this.config = validMusicAssistantConfig(config);
-    this.onPlayerUpdated = onPlayerUpdated;
+    this.onEvent = onEvent;
     this.reconnectTimer = null;
     this.stopped = false;
   }
@@ -391,7 +406,8 @@ export class MusicAssistantRealtime {
     socket.addEventListener("open", () => socket.send(JSON.stringify({ args: { token: this.config.accessToken }, command: "auth", message_id: "hoebbie-green" })));
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
-      if (message?.event === "player_updated" && message?.data && typeof message.data === "object") this.onPlayerUpdated();
+      const eventType = musicAssistantRealtimeEvent(message);
+      if (eventType) this.onEvent(eventType);
     });
     socket.addEventListener("close", () => {
       if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), 1_000);

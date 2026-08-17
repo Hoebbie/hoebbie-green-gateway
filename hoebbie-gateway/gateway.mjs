@@ -95,7 +95,10 @@ async function reportMusicAssistantDiscovery() {
 }
 
 const musicAssistantRealtime = musicAssistant
-  ? new MusicAssistantRealtime(musicAssistant.config, () => {
+  ? new MusicAssistantRealtime(musicAssistant.config, (eventType) => {
+    // The temporary E4.7.2 contract probe records only the documented event
+    // category. It does not expose payloads, IDs, credentials or media data.
+    console.info(`music_assistant.contract_event:${eventType}`);
     void reportMusicAssistantDiscovery().catch(() => console.error("music_assistant.live_state_report_failed"));
   })
   : null;

@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
 test("rejects an unsafe Music Assistant configuration before a request", () => {
   assert.throws(() => validMusicAssistantConfig({ ...config, accessToken: "short" }), MusicAssistantGatewayError);
   assert.throws(() => validMusicAssistantConfig({ ...config, baseUrl: "file:///tmp/music-assistant" }), MusicAssistantGatewayError);
+});
+
+test("accepts only the documented, payload-bearing realtime event categories", () => {
+  for (const event of ["player_updated", "queue_updated", "queue_items_updated"]) {
+    assert.equal(musicAssistantRealtimeEvent({ data: {}, event }), event);
+  }
+  assert.equal(musicAssistantRealtimeEvent({ data: 61.5, event: "queue_time_updated" }), "queue_time_updated");
+  assert.equal(musicAssistantRealtimeEvent({ data: {}, event: "queue_time_updated" }), null);
+  assert.equal(musicAssistantRealtimeEvent({ data: {}, event: "provider_event" }), null);
+  assert.equal(musicAssistantRealtimeEvent({ event: "queue_updated" }), null);
 });
 
 test("uses only the fixed player discovery command", async () => {
