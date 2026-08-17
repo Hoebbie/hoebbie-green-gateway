@@ -71,16 +71,24 @@ export function validMusicQueueTransferCommand(command) {
 /** The contract probe accepts only documented Music Assistant state events.
  * Their payload never leaves the local gateway and is deliberately not logged. */
 export function musicAssistantRealtimeEvent(message) {
+  return musicAssistantRealtimeObservation(message)?.eventType ?? null;
+}
+
+/** Returns only the event category and the presence of a documented timing
+ * anchor. Queue payloads, positions and identifiers stay local. */
+export function musicAssistantRealtimeObservation(message) {
   if (!message || typeof message !== "object") return null;
   if (message.event === "queue_time_updated") {
     return typeof message.data === "number" && Number.isFinite(message.data) && message.data >= 0
-      ? message.event
+      ? { eventType: message.event, timingAnchor: "elapsed" }
       : null;
   }
-  return ["player_updated", "queue_updated", "queue_items_updated"].includes(message.event)
-    && message.data && typeof message.data === "object"
-    ? message.event
-    : null;
+  if (!["player_updated", "queue_updated", "queue_items_updated"].includes(message.event) || !message.data || typeof message.data !== "object") return null;
+  const data = message.data;
+  const hasQueueTimeAnchor = message.event === "queue_updated"
+    && typeof data.elapsed_time === "number" && Number.isFinite(data.elapsed_time) && data.elapsed_time >= 0
+    && typeof data.elapsed_time_last_updated === "number" && Number.isFinite(data.elapsed_time_last_updated) && data.elapsed_time_last_updated > 0;
+  return { eventType: message.event, timingAnchor: hasQueueTimeAnchor ? "queue" : "none" };
 }
 
 function displayName(value) {
@@ -406,8 +414,8 @@ export class MusicAssistantRealtime {
     socket.addEventListener("open", () => socket.send(JSON.stringify({ args: { token: this.config.accessToken }, command: "auth", message_id: "hoebbie-green" })));
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
-      const eventType = musicAssistantRealtimeEvent(message);
-      if (eventType) this.onEvent(eventType);
+      const observation = musicAssistantRealtimeObservation(message);
+      if (observation) this.onEvent(observation);
     });
     socket.addEventListener("close", () => {
       if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), 1_000);

@@ -94,11 +94,15 @@ async function reportMusicAssistantDiscovery() {
   console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
 }
 
+let lastMusicAssistantContractEventAt = null;
 const musicAssistantRealtime = musicAssistant
-  ? new MusicAssistantRealtime(musicAssistant.config, (eventType) => {
+  ? new MusicAssistantRealtime(musicAssistant.config, ({ eventType, timingAnchor }) => {
     // The temporary E4.7.2 contract probe records only the documented event
     // category. It does not expose payloads, IDs, credentials or media data.
-    console.info(`music_assistant.contract_event:${eventType}`);
+    const now = Date.now();
+    const gapMilliseconds = lastMusicAssistantContractEventAt === null ? null : Math.max(0, now - lastMusicAssistantContractEventAt);
+    lastMusicAssistantContractEventAt = now;
+    console.info(`music_assistant.contract_event:${eventType},timing_anchor=${timingAnchor},gap_ms=${gapMilliseconds ?? "first"}`);
     void reportMusicAssistantDiscovery().catch(() => console.error("music_assistant.live_state_report_failed"));
   })
   : null;

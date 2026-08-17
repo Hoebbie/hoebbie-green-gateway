@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -18,6 +18,12 @@ test("accepts only the documented, payload-bearing realtime event categories", (
   assert.equal(musicAssistantRealtimeEvent({ data: {}, event: "queue_time_updated" }), null);
   assert.equal(musicAssistantRealtimeEvent({ data: {}, event: "provider_event" }), null);
   assert.equal(musicAssistantRealtimeEvent({ event: "queue_updated" }), null);
+});
+
+test("retains only a safe timing-anchor category for the contract probe", () => {
+  assert.deepEqual(musicAssistantRealtimeObservation({ data: 61.5, event: "queue_time_updated" }), { eventType: "queue_time_updated", timingAnchor: "elapsed" });
+  assert.deepEqual(musicAssistantRealtimeObservation({ data: { elapsed_time: 61, elapsed_time_last_updated: 1_786_999_000 }, event: "queue_updated" }), { eventType: "queue_updated", timingAnchor: "queue" });
+  assert.deepEqual(musicAssistantRealtimeObservation({ data: {}, event: "queue_updated" }), { eventType: "queue_updated", timingAnchor: "none" });
 });
 
 test("uses only the fixed player discovery command", async () => {
