@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -125,9 +125,9 @@ test("reads only local API documentation for E4.2 group feasibility", async () =
   const calls = [];
   const client = new MusicAssistantClient(config, async (url, options) => {
     calls.push({ options, url });
-    return new Response("players/cmd/group players/cmd/ungroup player_queues/get player_queues/next player_queues/previous player_queues/transfer", { status: 200 });
+    return new Response("players/cmd/group players/cmd/ungroup player_queues/get player_queues/next player_queues/previous player_queues/shuffle player_queues/transfer", { status: 200 });
   });
-  assert.deepEqual(await client.groupCapabilities(), { group: true, next: true, playMedia: false, previous: true, queueGet: true, queueTransfer: true, setMembers: false, ungroup: true });
+  assert.deepEqual(await client.groupCapabilities(), { group: true, next: true, playMedia: false, previous: true, queueGet: true, queueTransfer: true, setMembers: false, shuffle: true, ungroup: true });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "http://music-assistant.local:8095/api-docs");
   assert.equal(calls[0].options.method, "GET");
@@ -158,7 +158,7 @@ test("normalizes only the active queue snapshot and keeps a public Spotify cover
   const sourceSeconds = Date.now() / 1_000;
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, elapsed_time_last_updated: sourceSeconds, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
   const snapshot = await client.activeQueueSnapshot();
-  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, observedAt: undefined, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
+  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
   assert.equal(snapshot.sourceTime, new Date(sourceSeconds * 1_000).toISOString());
 });
@@ -179,7 +179,7 @@ test("does not expose local or credentialed artwork paths", async () => {
 test("reads a paused target queue without treating it as playing", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "paused" }]), { status: 200 }));
   const snapshot = await client.queueSnapshot("sonos:kitchen");
-  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: null, artist: null, artworkRef: null, durationSeconds: 240, isPlaying: false, observedAt: undefined, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
+  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: null, artist: null, artworkRef: null, durationSeconds: 240, isPlaying: false, observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
   assert.equal(snapshot.sourceTime, null);
 });
@@ -302,6 +302,25 @@ test("rejects every skip direction outside the fixed pair before a request", asy
   assert.equal(validMusicSkipCommand({ commandId: "command", direction: "shuffle", sourcePlayerId: "sonos:kitchen" }), false);
   const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
   await assert.rejects(client.skipQueue({ commandId: "command", direction: "shuffle", sourcePlayerId: "sonos:kitchen" }), { code: "music_assistant.invalid_skip" });
+});
+
+for (const shuffleEnabled of [true, false]) test(`sets playlist shuffle=${shuffleEnabled} only through the fixed queue command and verifies it`, async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "player_queues/shuffle") return new Response("null", { status: 200 });
+    return new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 20, queue_id: "sonos:kitchen", shuffle_enabled: shuffleEnabled, state: "playing" }]), { status: 200 });
+  });
+  const snapshot = await client.setShuffle({ commandId: "command", shuffleEnabled, sourcePlayerId: "sonos:kitchen" });
+  assert.equal(snapshot.shuffleEnabled, shuffleEnabled);
+  assert.deepEqual(calls.map((call) => call.command), ["player_queues/shuffle", "player_queues/all"]);
+  assert.deepEqual(calls[0].args, { queue_id: "sonos:kitchen", shuffle_enabled: shuffleEnabled });
+});
+
+test("rejects a malformed shuffle command before a request", async () => {
+  assert.equal(validMusicShuffleCommand({ commandId: "command", shuffleEnabled: "yes", sourcePlayerId: "sonos:kitchen" }), false);
+  const client = new MusicAssistantClient(config, async () => assert.fail("must not send a request"));
+  await assert.rejects(client.setShuffle({ commandId: "command", shuffleEnabled: "yes", sourcePlayerId: "sonos:kitchen" }), { code: "music_assistant.invalid_shuffle" });
 });
 
 test("accepts only a verified E3 pause command", async () => {

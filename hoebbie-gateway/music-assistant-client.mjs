@@ -80,6 +80,14 @@ export function validMusicSkipCommand(command) {
     && (command.direction === "previous" || command.direction === "next"));
 }
 
+export function validMusicShuffleCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.sourcePlayerId === "string"
+    && playerId(command.sourcePlayerId)
+    && typeof command.shuffleEnabled === "boolean");
+}
+
 export function validMusicStartCommand(command) {
   return Boolean(command
     && typeof command.commandId === "string"
@@ -334,7 +342,7 @@ export class MusicAssistantClient {
     const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
     const isPlaying = String(queue.state).toUpperCase() === "PLAYING";
     const observedAt = new Date().toISOString();
-    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, observedAt, progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
+    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
     return includeQueueIndex ? { ...snapshot, queueIndex: Number.isInteger(queue.current_index) && queue.current_index >= 0 ? queue.current_index : null } : snapshot;
   }
 
@@ -413,6 +421,20 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.skip_verification_failed", "Music Assistant hat den Titelwechsel nicht bestätigt.");
+  }
+
+  /** Sets the one server-derived playlist shuffle state and confirms it by
+   * reading the same Music Assistant queue back. */
+  async setShuffle(command) {
+    if (!validMusicShuffleCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_shuffle", "Der freigegebene Shuffle-Auftrag ist ungültig.");
+    const result = await this.command("player_queues/shuffle", { queue_id: command.sourcePlayerId, shuffle_enabled: command.shuffleEnabled });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.shuffle_failed", "Music Assistant hat Shuffle nicht gesetzt.");
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const snapshot = await this.queueSnapshot(command.sourcePlayerId);
+      if (snapshot?.sourcePlayerId === command.sourcePlayerId && snapshot.title && snapshot.shuffleEnabled === command.shuffleEnabled) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.shuffle_verification_failed", "Music Assistant hat Shuffle nicht bestätigt.");
   }
 
   /** Replaces one fixed target queue with the server-authorized media URI and
@@ -529,6 +551,7 @@ export class MusicAssistantClient {
       queueGet: document.includes("player_queues/get"),
       queueTransfer: document.includes("player_queues/transfer"),
       setMembers: document.includes("players/cmd/set_members"),
+      shuffle: document.includes("player_queues/shuffle"),
       ungroup: document.includes("players/cmd/ungroup")
     };
   }

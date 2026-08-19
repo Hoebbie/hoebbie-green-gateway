@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
 import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
@@ -73,7 +73,7 @@ async function reportMusicAssistantGroupCapabilities() {
   const capabilities = await musicAssistant.groupCapabilities();
   // These booleans describe only the generated documentation shell. They are
   // never treated as a feature decision because MA's HTML can omit commands.
-  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},next=${capabilities.next},play_media=${capabilities.playMedia},previous=${capabilities.previous},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},next=${capabilities.next},play_media=${capabilities.playMedia},previous=${capabilities.previous},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},shuffle=${capabilities.shuffle},ungroup=${capabilities.ungroup}`);
   const queueRegistryAvailable = await musicAssistant.queueRegistryAvailable();
   // No queue, title, media id or player identifier is logged or persisted.
   console.info(`music_assistant.queue_registry_readable=${queueRegistryAvailable}`);
@@ -512,6 +512,19 @@ async function runMusicProfileSkipOnce() {
   return true;
 }
 
+async function runMusicProfileShuffleOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_shuffle_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicShuffleCommand(command)) throw new Error("gateway.music_profile_shuffle_claim_invalid");
+  let completion;
+  try { completion = { commandId: command.commandId, mode: "music_profile_shuffle_complete", snapshot: await withinDeadline(musicAssistant.setShuffle(command), 12_000, "music_assistant.shuffle_timeout"), success: true }; }
+  catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_shuffle_complete", success: false }; }
+  await reportCommandCompletion(completion, "gateway.music_profile_shuffle_completion_failed");
+  return true;
+}
+
 async function runMusicCatalogOnce() {
   if (!musicAssistant) return false;
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_catalog_claim" }) });
@@ -577,6 +590,7 @@ const musicProfileTransferCommandDrain = new BoundedQueueDrain({
 });
 const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSeekOnce, onClaimed: (count) => console.info(`gateway.music_profile_seek_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Seek-Auftragsgrenze erreicht.") });
 const musicProfileSkipCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSkipOnce, onClaimed: (count) => console.info(`gateway.music_profile_skip_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Skip-Auftragsgrenze erreicht.") });
+const musicProfileShuffleCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileShuffleOnce, onClaimed: (count) => console.info(`gateway.music_profile_shuffle_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Shuffle-Auftragsgrenze erreicht.") });
 const musicCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicCatalogOnce, onClaimed: (count) => console.info(`gateway.music_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Suchauftragsgrenze erreicht.") });
 const musicStartCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicStartOnce, onClaimed: (count) => console.info(`gateway.music_profile_start_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Startauftragsgrenze erreicht.") });
 const musicGroupCommandDrain = new BoundedQueueDrain({
@@ -623,6 +637,7 @@ function drainCommands() {
   void musicProfileTransferCommandDrain.request();
   void musicProfileSeekCommandDrain.request();
   void musicProfileSkipCommandDrain.request();
+  void musicProfileShuffleCommandDrain.request();
   void musicCatalogCommandDrain.request();
   void musicStartCommandDrain.request();
   void musicGroupCommandDrain.request();
