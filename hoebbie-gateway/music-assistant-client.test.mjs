@@ -123,6 +123,21 @@ test("reads a paused target queue without treating it as playing", async () => {
   assert.equal(snapshot.sourceTime, null);
 });
 
+test("retains the confirmed profile queue to publish a pause without guessing another paused queue", async () => {
+  let queueState = "playing";
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([
+    { current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: queueState },
+    { current_item: { duration: 240, name: "Anderer Titel" }, elapsed_time: 12, queue_id: "sonos:dining", state: "paused" }
+  ]), { status: 200 }));
+
+  assert.equal((await client.activeQueueSnapshot()).isPlaying, true);
+  queueState = "paused";
+  const paused = await client.activeQueueSnapshot();
+  assert.equal(paused.sourcePlayerId, "sonos:kitchen");
+  assert.equal(paused.isPlaying, false);
+  assert.equal(paused.progressSeconds, 61);
+});
+
 test("transfers only a bounded queue and confirms its target", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {
