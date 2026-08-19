@@ -54,6 +54,12 @@ function musicAssistantClientFromEnvironment() {
 }
 
 const musicAssistant = musicAssistantClientFromEnvironment();
+const musicProfileProviders = (() => {
+  try {
+    const value = JSON.parse(process.env.MUSIC_PROFILE_PROVIDERS_JSON ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { throw new Error("Die Music-Assistant-Profilzuordnung ist ungültig."); }
+})();
 
 if (musicAssistant) musicAssistant.restoreProfileQueue(persistedProfileQueueId());
 
@@ -475,6 +481,28 @@ async function runMusicProfileSeekOnce() {
   return true;
 }
 
+async function runMusicCatalogOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_catalog_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || typeof command?.commandId !== "string" || typeof command?.profileKey !== "string" || !["title", "playlists"].includes(command.queryKind)) throw new Error("gateway.music_catalog_claim_invalid");
+  const provider = musicProfileProviders[command.profileKey];
+  let completion;
+  try {
+    const items = command.queryKind === "title"
+      ? await withinDeadline(musicAssistant.searchTracks(command.query, provider), 8_000, "music_assistant.search_timeout")
+      : await withinDeadline(musicAssistant.listPlaylists(command.pageOffset, provider), 8_000, "music_assistant.playlists_timeout");
+    completion = { commandId: command.commandId, items, mode: "music_catalog_complete", success: true };
+  } catch (error) {
+    const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
+    completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_catalog_complete", success: false };
+  }
+  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
+  if (!reported.ok) throw new Error("gateway.music_catalog_completion_failed");
+  return true;
+}
+
 let polling = false;
 let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
@@ -499,6 +527,7 @@ const musicProfileTransferCommandDrain = new BoundedQueueDrain({
   onLimit: () => console.error("Der Music-Assistant-Gateway hat die Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
 });
 const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSeekOnce, onClaimed: (count) => console.info(`gateway.music_profile_seek_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Seek-Auftragsgrenze erreicht.") });
+const musicCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicCatalogOnce, onClaimed: (count) => console.info(`gateway.music_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Suchauftragsgrenze erreicht.") });
 const musicGroupCommandDrain = new BoundedQueueDrain({
   claimOnce: runMusicGroupOnce,
   onClaimed: (count) => console.info(`gateway.music_group_command_claimed:${count}`),
@@ -542,6 +571,7 @@ function drainCommands() {
   void musicVolumeCommandDrain.request();
   void musicProfileTransferCommandDrain.request();
   void musicProfileSeekCommandDrain.request();
+  void musicCatalogCommandDrain.request();
   void musicGroupCommandDrain.request();
   void drainDeviceCommands();
 }

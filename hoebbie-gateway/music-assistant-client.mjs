@@ -101,6 +101,28 @@ function displayName(value) {
   return normalized.length >= 1 && normalized.length <= 120 ? normalized : null;
 }
 
+function mediaLabel(value, limit = 180) {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.replace(/\s+/g, " ").trim().slice(0, limit)
+    : null;
+}
+
+function selectedMediaItem(value, kind) {
+  if (!value || typeof value !== "object") return null;
+  const name = mediaLabel(value.name);
+  const uri = mediaLabel(value.uri, 500);
+  if (!name || !uri || !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
+  const artist = kind === "track" ? mediaLabel(value.artists?.[0]?.name ?? value.artist?.name ?? value.artist) : null;
+  return { artist, kind, name, uri };
+}
+
+function belongsToProvider(value, providerInstanceId) {
+  if (!value || typeof value !== "object") return false;
+  if (value.provider === providerInstanceId) return true;
+  return Array.isArray(value.provider_mappings)
+    && value.provider_mappings.some((mapping) => mapping?.provider_instance === providerInstanceId);
+}
+
 /** A queue can contain artwork from many Music Assistant providers. The
  * profile snapshot carries only Spotify's public CDN image, never an MA path,
  * an authenticated URL, or a provider token. */
@@ -207,6 +229,32 @@ export class MusicAssistantClient {
       players.push(player);
     }
     return players;
+  }
+
+  /** Reads only a bounded list of tracks. Provider URIs remain local to Green
+   * and are later replaced by an opaque server-side selection reference. */
+  async searchTracks(query, providerInstanceId) {
+    const searchQuery = mediaLabel(query, 100);
+    const provider = playerId(providerInstanceId);
+    if (!searchQuery || !provider) throw new MusicAssistantGatewayError("music_assistant.search_invalid", "Die Titelsuche ist ungültig.");
+    // Music Assistant 2.9.13 officially exposes global search without a
+    // provider argument. Keep the command contract exact and enforce the
+    // profile's provider on the returned provider mappings before any item
+    // can leave Green.
+    const response = await this.command("music/search", { limit: 20, media_types: ["track"], search_query: searchQuery });
+    const rows = response.payload?.tracks ?? response.payload?.result?.tracks;
+    if (!response.ok || !Array.isArray(rows)) throw new MusicAssistantGatewayError("music_assistant.search_unavailable", "Music Assistant konnte keine Titel suchen.");
+    return rows.filter((item) => belongsToProvider(item, provider)).slice(0, 20).map((item) => selectedMediaItem(item, "track")).filter(Boolean);
+  }
+
+  /** Reads the configured Music-Assistant playlist library without changing a queue. */
+  async listPlaylists(offset = 0, providerInstanceId) {
+    const provider = playerId(providerInstanceId);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 500 || !provider) throw new MusicAssistantGatewayError("music_assistant.playlists_invalid", "Die Playlist-Seite ist ungültig.");
+    const response = await this.command("music/playlists/library_items", { limit: 20, offset, provider });
+    const rows = Array.isArray(response.payload) ? response.payload : response.payload?.result;
+    if (!response.ok || !Array.isArray(rows)) throw new MusicAssistantGatewayError("music_assistant.playlists_unavailable", "Music Assistant konnte keine Playlists lesen.");
+    return rows.slice(0, 20).map((item) => selectedMediaItem(item, "playlist")).filter(Boolean);
   }
 
   /**

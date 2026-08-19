@@ -10,5 +10,6 @@ export HOEBBIE_GATEWAY_URL="https://rstobkrfiebbmolrglal.supabase.co/functions/v
 # callers; it is never printed by this script or the gateway.
 export MUSIC_ASSISTANT_URL="$(bashio::config 'music_assistant_url')"
 export MUSIC_ASSISTANT_ACCESS_TOKEN="$(bashio::config 'music_assistant_access_token')"
+export MUSIC_PROFILE_PROVIDERS_JSON="$(bashio::config 'music_profile_providers_json')"
 
 exec node /app/gateway.mjs

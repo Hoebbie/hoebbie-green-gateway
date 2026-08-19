@@ -38,6 +38,37 @@ test("uses only the fixed player discovery command", async () => {
   assert.deepEqual(JSON.parse(calls[0].options.body), { args: {}, command: "players/all", message_id: "1" });
 });
 
+test("uses fixed bounded commands for title search and playlist browsing", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    return new Response(JSON.stringify(request.command === "music/search"
+      ? { tracks: [{ artists: [{ name: "Künstler" }], name: "Titel", provider_mappings: [{ provider_instance: "spotify--lars" }], uri: "spotify://track/123" }] }
+      : [{ name: "Meine Playlist", uri: "spotify://playlist/456" }]), { status: 200 });
+  });
+  assert.deepEqual(await client.searchTracks("Titel", "spotify--lars"), [{ artist: "Künstler", kind: "track", name: "Titel", uri: "spotify://track/123" }]);
+  assert.deepEqual(await client.listPlaylists(0, "spotify--lars"), [{ artist: null, kind: "playlist", name: "Meine Playlist", uri: "spotify://playlist/456" }]);
+  assert.deepEqual(calls.map((call) => call.command), ["music/search", "music/playlists/library_items"]);
+  assert.deepEqual(calls[0].args, { limit: 20, media_types: ["track"], search_query: "Titel" });
+  assert.equal(calls[1].args.provider, "spotify--lars");
+});
+
+test("filters global search results to the authorized profile provider", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ tracks: [
+    { name: "Fremder Titel", provider_mappings: [{ provider_instance: "spotify--other" }], uri: "spotify://track/other" },
+    { name: "Mein Titel", provider_mappings: [{ provider_instance: "spotify--lars" }], uri: "spotify://track/mine" }
+  ] }), { status: 200 }));
+  assert.deepEqual(await client.searchTracks("Titel", "spotify--lars"), [{ artist: null, kind: "track", name: "Mein Titel", uri: "spotify://track/mine" }]);
+});
+
+test("rejects catalog reads without an explicit profile provider", async () => {
+  let requests = 0;
+  const client = new MusicAssistantClient(config, async () => { requests += 1; return new Response("[]", { status: 200 }); });
+  await assert.rejects(client.searchTracks("Titel"), { code: "music_assistant.search_invalid" });
+  await assert.rejects(client.listPlaylists(0), { code: "music_assistant.playlists_invalid" });
+  assert.equal(requests, 0);
+});
+
 test("accepts the current Music Assistant PlayerState response", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ available: true, name: "Wohnzimmer", player_id: "sonos:RINCON_123", playback_state: "playing", powered: true, volume_level: 42 }]), { status: 200 }));
   assert.deepEqual(await client.listPlayers(), [{ available: true, displayName: "Wohnzimmer", groupMembers: [], id: "sonos:RINCON_123", isPlaying: true, powered: true, syncedTo: null, volume: 42 }]);
