@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -163,6 +163,23 @@ test("does not transfer to a target that is currently unavailable", async () => 
 
 test("rejects a same-room or malformed queue transfer before a request", () => {
   assert.equal(validMusicQueueTransferCommand({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:kitchen" }), false);
+});
+
+test("seeks only through the fixed command and confirms the re-read queue", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "players/cmd/seek") return new Response("null", { status: 200 });
+    return new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 120, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+  });
+  const snapshot = await client.seekQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetSeconds: 120 });
+  assert.equal(snapshot.progressSeconds, 120);
+  assert.deepEqual(calls.map((call) => call.command), ["player_queues/all", "players/cmd/seek", "player_queues/all"]);
+  assert.deepEqual(calls[1].args, { player_id: "sonos:kitchen", position: 120 });
+});
+
+test("rejects an invalid seek before any Music Assistant request", () => {
+  assert.equal(validMusicSeekCommand({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetSeconds: -1 }), false);
 });
 
 test("accepts only a verified E3 pause command", async () => {
