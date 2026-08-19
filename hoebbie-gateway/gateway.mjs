@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
+import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -108,7 +109,7 @@ async function reportMusicAssistantDiscovery() {
   const snapshot = await musicAssistant.activeQueueSnapshot();
   if (snapshot) {
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
-    if (!sessionReported.ok) throw new Error("gateway.music_profile_snapshot_report_failed");
+    if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     persistProfileQueueId(snapshot.sourcePlayerId);
   }
   const available = players.filter((player) => player.available).length;
@@ -126,7 +127,7 @@ const musicAssistantRealtime = musicAssistant
     const gapMilliseconds = lastMusicAssistantContractEventAt === null ? null : Math.max(0, now - lastMusicAssistantContractEventAt);
     lastMusicAssistantContractEventAt = now;
     console.info(`music_assistant.contract_event:${eventType},timing_anchor=${timingAnchor},gap_ms=${gapMilliseconds ?? "first"}`);
-    void reportMusicAssistantDiscovery().catch(() => console.error("music_assistant.live_state_report_failed"));
+    void reportMusicAssistantDiscovery().catch((error) => console.error(safeGatewayError(error, "music_assistant.live_state_report_failed")));
   })
   : null;
 
@@ -191,16 +192,19 @@ async function request(url, options) {
 }
 
 async function reportCommandCompletion(completion, failureCode) {
+  let lastFailure = failureCode;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const reported = await withinDeadline(request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) }), 4_000, failureCode);
       if (reported.ok) return;
-    } catch {
+      lastFailure = await safeGatewayResponseFailure(reported, failureCode);
+    } catch (error) {
       // A lost response is safe to retry because completion RPCs are
       // idempotent for the same final state.
+      lastFailure = safeGatewayError(error, failureCode);
     }
   }
-  throw new Error(failureCode);
+  throw new Error(lastFailure);
 }
 
 async function resolvePilotEntityId() {
@@ -219,12 +223,7 @@ async function resolvePilotEntityId() {
 
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
-await reportMusicAssistantDiscovery().catch((error) => {
-  const code = error && typeof error === "object" && typeof error.code === "string"
-    ? error.code
-    : "music_assistant.discovery_unavailable";
-  console.error(code);
-});
+await reportMusicAssistantDiscovery().catch((error) => console.error(safeGatewayError(error, "music_assistant.discovery_unavailable")));
 
 function discoveredEntity(state, areaNames) {
   if (typeof state?.entity_id !== "string") return null;
