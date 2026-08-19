@@ -68,6 +68,10 @@ export function validMusicQueueTransferCommand(command) {
     && command.sourcePlayerId !== command.targetPlayerId);
 }
 
+export function validMusicSeekCommand(command) {
+  return Boolean(command && typeof command.commandId === "string" && typeof command.sourcePlayerId === "string" && playerId(command.sourcePlayerId) && Number.isInteger(command.targetSeconds) && command.targetSeconds >= 0);
+}
+
 /** The contract probe accepts only documented Music Assistant state events.
  * Their payload never leaves the local gateway and is deliberately not logged. */
 export function musicAssistantRealtimeEvent(message) {
@@ -272,6 +276,20 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.queue_transfer_verification_failed", "Music Assistant hat den Raumwechsel nicht bestätigt.");
+  }
+
+  async seekQueue(command) {
+    if (!validMusicSeekCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_seek", "Der freigegebene Zeitpunkt ist ungültig.");
+    const before = await this.queueSnapshot(command.sourcePlayerId);
+    if (!before || before.durationSeconds === null || command.targetSeconds > before.durationSeconds) throw new MusicAssistantGatewayError("music_assistant.seek_unavailable", "Der Zeitpunkt ist nicht bestätigt.");
+    const result = await this.command("players/cmd/seek", { player_id: command.sourcePlayerId, position: command.targetSeconds });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.seek_failed", "Music Assistant hat den Zeitpunkt nicht gesetzt.");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const snapshot = await this.queueSnapshot(command.sourcePlayerId);
+      if (snapshot?.sourcePlayerId === command.sourcePlayerId && snapshot.durationSeconds !== null && Math.abs(snapshot.progressSeconds - command.targetSeconds) <= 2) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.seek_verification_failed", "Music Assistant hat den Zeitpunkt nicht bestätigt.");
   }
 
   async setPlayback(command) {
