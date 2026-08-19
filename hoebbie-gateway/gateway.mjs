@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
@@ -72,7 +72,7 @@ async function reportMusicAssistantGroupCapabilities() {
   const capabilities = await musicAssistant.groupCapabilities();
   // These booleans describe only the generated documentation shell. They are
   // never treated as a feature decision because MA's HTML can omit commands.
-  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},play_media=${capabilities.playMedia},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
   const queueRegistryAvailable = await musicAssistant.queueRegistryAvailable();
   // No queue, title, media id or player identifier is logged or persisted.
   console.info(`music_assistant.queue_registry_readable=${queueRegistryAvailable}`);
@@ -188,6 +188,19 @@ async function request(url, options) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8_000) }).catch(() => null);
   if (!response) throw new Error("Die Verbindung ist nicht erreichbar.");
   return response;
+}
+
+async function reportCommandCompletion(completion, failureCode) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const reported = await withinDeadline(request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) }), 4_000, failureCode);
+      if (reported.ok) return;
+    } catch {
+      // A lost response is safe to retry because completion RPCs are
+      // idempotent for the same final state.
+    }
+  }
+  throw new Error(failureCode);
 }
 
 async function resolvePilotEntityId() {
@@ -498,8 +511,26 @@ async function runMusicCatalogOnce() {
     const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
     completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_catalog_complete", success: false };
   }
-  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
-  if (!reported.ok) throw new Error("gateway.music_catalog_completion_failed");
+  await reportCommandCompletion(completion, "gateway.music_catalog_completion_failed");
+  console.info(`gateway.music_catalog_completed:${command.queryKind}:${completion.success ? "success" : "failed"}`);
+  return true;
+}
+
+async function runMusicStartOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_start_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicStartCommand(command)) throw new Error("gateway.music_profile_start_claim_invalid");
+  let completion;
+  try {
+    completion = { commandId: command.commandId, mode: "music_profile_start_complete", snapshot: await withinDeadline(musicAssistant.startPlayback(command), 15_000, "music_assistant.start_timeout"), success: true };
+  } catch (error) {
+    const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
+    completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_start_complete", success: false };
+  }
+  await reportCommandCompletion(completion, "gateway.music_profile_start_completion_failed");
+  console.info(`gateway.music_profile_start_completed:${completion.success ? "success" : "failed"}`);
   return true;
 }
 
@@ -528,6 +559,7 @@ const musicProfileTransferCommandDrain = new BoundedQueueDrain({
 });
 const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSeekOnce, onClaimed: (count) => console.info(`gateway.music_profile_seek_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Seek-Auftragsgrenze erreicht.") });
 const musicCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicCatalogOnce, onClaimed: (count) => console.info(`gateway.music_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Suchauftragsgrenze erreicht.") });
+const musicStartCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicStartOnce, onClaimed: (count) => console.info(`gateway.music_profile_start_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Startauftragsgrenze erreicht.") });
 const musicGroupCommandDrain = new BoundedQueueDrain({
   claimOnce: runMusicGroupOnce,
   onClaimed: (count) => console.info(`gateway.music_group_command_claimed:${count}`),
@@ -572,6 +604,7 @@ function drainCommands() {
   void musicProfileTransferCommandDrain.request();
   void musicProfileSeekCommandDrain.request();
   void musicCatalogCommandDrain.request();
+  void musicStartCommandDrain.request();
   void musicGroupCommandDrain.request();
   void drainDeviceCommands();
 }

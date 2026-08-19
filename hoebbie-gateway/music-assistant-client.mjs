@@ -72,6 +72,18 @@ export function validMusicSeekCommand(command) {
   return Boolean(command && typeof command.commandId === "string" && typeof command.sourcePlayerId === "string" && playerId(command.sourcePlayerId) && Number.isInteger(command.targetSeconds) && command.targetSeconds >= 0);
 }
 
+export function validMusicStartCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.targetPlayerId === "string"
+    && playerId(command.targetPlayerId)
+    && typeof command.mediaUri === "string"
+    && command.mediaUri.length >= 4
+    && command.mediaUri.length <= 500
+    && /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$/i.test(command.mediaUri)
+    && (command.mediaKind === "track" || command.mediaKind === "playlist"));
+}
+
 /** The contract probe accepts only documented Music Assistant state events.
  * Their payload never leaves the local gateway and is deliberately not logged. */
 export function musicAssistantRealtimeEvent(message) {
@@ -360,6 +372,33 @@ export class MusicAssistantClient {
     throw new MusicAssistantGatewayError("music_assistant.seek_verification_failed", "Music Assistant hat den Zeitpunkt nicht bestätigt.");
   }
 
+  /** Replaces one fixed target queue with the server-authorized media URI and
+   * returns only after the target is observed playing. The URI never appears
+   * in logs, snapshots or mobile responses. */
+  async startPlayback(command) {
+    if (!validMusicStartCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_start", "Der freigegebene Musikstart ist ungültig.");
+    const target = await this.getPlayer(command.targetPlayerId);
+    if (!target.available) throw new MusicAssistantGatewayError("music_assistant.start_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
+    const before = await this.queueSnapshot(command.targetPlayerId);
+    const result = await this.command("player_queues/play_media", { media: command.mediaUri, option: "replace", queue_id: command.targetPlayerId, radio_mode: false });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.start_failed", "Music Assistant hat den Musikstart nicht ausgeführt.");
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const snapshot = await this.queueSnapshot(command.targetPlayerId);
+      const observedTarget = await this.getPlayer(command.targetPlayerId);
+      const playbackChanged = !before
+        || snapshot?.title !== before.title
+        || snapshot?.artist !== before.artist
+        || (snapshot?.progressSeconds !== null && snapshot?.progressSeconds !== undefined && snapshot.progressSeconds <= 5)
+        || (snapshot?.progressSeconds !== null && snapshot?.progressSeconds !== undefined && before.progressSeconds !== null && snapshot.progressSeconds < before.progressSeconds);
+      if (snapshot?.sourcePlayerId === command.targetPlayerId && snapshot.isPlaying && observedTarget.available && observedTarget.isPlaying && snapshot.title && playbackChanged) {
+        this.#profileQueueId = command.targetPlayerId;
+        return snapshot;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.start_verification_failed", "Music Assistant hat den Musikstart nicht bestätigt.");
+  }
+
   async setPlayback(command) {
     if (!validMusicCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Wiedergabeauftrag ist ungültig.");
     const actionResult = await this.command(command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", { player_id: command.playerId });
@@ -441,6 +480,7 @@ export class MusicAssistantClient {
     }
     return {
       group: document.includes("players/cmd/group"),
+      playMedia: document.includes("player_queues/play_media"),
       queueGet: document.includes("player_queues/get"),
       queueTransfer: document.includes("player_queues/transfer"),
       setMembers: document.includes("players/cmd/set_members"),

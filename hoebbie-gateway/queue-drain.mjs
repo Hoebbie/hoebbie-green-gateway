@@ -46,7 +46,11 @@ export async function withinDeadline(promise, milliseconds, code) {
     return await Promise.race([
       promise,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(code)), milliseconds);
+        timer = setTimeout(() => {
+          const error = new Error(code);
+          error.code = code;
+          reject(error);
+        }, milliseconds);
       })
     ]);
   } finally {

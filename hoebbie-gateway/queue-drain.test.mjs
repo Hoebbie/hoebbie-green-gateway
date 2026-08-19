@@ -39,6 +39,6 @@ test("remembers a wake-up received while a music claim is running", async () => 
 test("releases a stuck local operation after its deadline", async () => {
   await assert.rejects(
     withinDeadline(new Promise(() => undefined), 10, "music_assistant.command_timeout"),
-    { message: "music_assistant.command_timeout" }
+    { code: "music_assistant.command_timeout", message: "music_assistant.command_timeout" }
   );
 });

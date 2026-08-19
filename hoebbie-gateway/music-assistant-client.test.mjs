@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -51,6 +51,27 @@ test("uses fixed bounded commands for title search and playlist browsing", async
   assert.deepEqual(calls.map((call) => call.command), ["music/search", "music/playlists/library_items"]);
   assert.deepEqual(calls[0].args, { limit: 20, media_types: ["track"], search_query: "Titel" });
   assert.equal(calls[1].args.provider, "spotify--lars");
+});
+
+test("starts only a validated server-authorized media URI and verifies the target", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "players/get") return new Response(JSON.stringify({ available: true, name: "Wohnzimmer", player_id: "sonos:living", powered: true, state: "playing" }), { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { artists: [{ name: "Künstler" }], duration: 200, name: "Titel" }, elapsed_time: 0, queue_id: "sonos:living", state: "playing" }]), { status: 200 });
+    return new Response(JSON.stringify(null), { status: 200 });
+  });
+  const command = { commandId: "start-1", mediaKind: "playlist", mediaUri: "spotify://playlist/456", targetPlayerId: "sonos:living" };
+  assert.equal(validMusicStartCommand(command), true);
+  assert.equal((await client.startPlayback(command)).sourcePlayerId, "sonos:living");
+  assert.deepEqual(calls.find((call) => call.command === "player_queues/play_media")?.args, { media: "spotify://playlist/456", option: "replace", queue_id: "sonos:living", radio_mode: false });
+});
+
+test("rejects malformed start media before Music Assistant is called", async () => {
+  let requests = 0;
+  const client = new MusicAssistantClient(config, async () => { requests += 1; return new Response(null, { status: 200 }); });
+  await assert.rejects(client.startPlayback({ commandId: "start-1", mediaKind: "playlist", mediaUri: "javascript:bad", targetPlayerId: "sonos:living" }), { code: "music_assistant.invalid_start" });
+  assert.equal(requests, 0);
 });
 
 test("filters global search results to the authorized profile provider", async () => {
@@ -106,7 +127,7 @@ test("reads only local API documentation for E4.2 group feasibility", async () =
     calls.push({ options, url });
     return new Response("players/cmd/group players/cmd/ungroup player_queues/get player_queues/transfer", { status: 200 });
   });
-  assert.deepEqual(await client.groupCapabilities(), { group: true, queueGet: true, queueTransfer: true, setMembers: false, ungroup: true });
+  assert.deepEqual(await client.groupCapabilities(), { group: true, playMedia: false, queueGet: true, queueTransfer: true, setMembers: false, ungroup: true });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "http://music-assistant.local:8095/api-docs");
   assert.equal(calls[0].options.method, "GET");
