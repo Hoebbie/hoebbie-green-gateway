@@ -151,6 +151,10 @@ export function validMusicAssistantConfig(config) {
  */
 export class MusicAssistantClient {
   #sequence = 0;
+  // A profile session is allowed to retain only its already confirmed queue.
+  // This lets a PAUSED event update that same session without guessing between
+  // unrelated paused queues elsewhere in the household.
+  #profileQueueId = null;
 
   constructor(config, fetcher = fetch) {
     this.config = validMusicAssistantConfig(config);
@@ -249,9 +253,16 @@ export class MusicAssistantClient {
     const result = await this.command("player_queues/all", {});
     const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
     if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
-    const active = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING");
-    const activeId = active && typeof active === "object" ? playerId(active.queue_id) : null;
-    return activeId ? this.queueSnapshot(activeId) : null;
+    const playing = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING");
+    const playingId = playing && typeof playing === "object" ? playerId(playing.queue_id) : null;
+    const retainedPaused = this.#profileQueueId && queues.some((item) => item && typeof item === "object" && playerId(item.queue_id) === this.#profileQueueId && String(item.state).toUpperCase() === "PAUSED")
+      ? this.#profileQueueId
+      : null;
+    const activeId = playingId ?? retainedPaused;
+    if (!activeId) return null;
+    const snapshot = await this.queueSnapshot(activeId);
+    if (snapshot) this.#profileQueueId = snapshot.sourcePlayerId;
+    return snapshot;
   }
 
   /** Executes only the fixed, server-authorized queue transfer and confirms
