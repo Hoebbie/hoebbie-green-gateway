@@ -161,6 +161,15 @@ export class MusicAssistantClient {
     this.fetcher = fetcher;
   }
 
+  /** Restores only the prior, server-confirmed profile queue after a Green
+   * restart. Invalid or absent local state is ignored rather than guessed. */
+  restoreProfileQueue(value) {
+    const restored = playerId(value);
+    if (!restored) return false;
+    this.#profileQueueId = restored;
+    return true;
+  }
+
   async listPlayers() {
     let response;
     try {
@@ -255,10 +264,10 @@ export class MusicAssistantClient {
     if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
     const playing = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING");
     const playingId = playing && typeof playing === "object" ? playerId(playing.queue_id) : null;
-    const retainedPaused = this.#profileQueueId && queues.some((item) => item && typeof item === "object" && playerId(item.queue_id) === this.#profileQueueId && String(item.state).toUpperCase() === "PAUSED")
+    const retainedInactive = this.#profileQueueId && queues.some((item) => item && typeof item === "object" && playerId(item.queue_id) === this.#profileQueueId && ["PAUSED", "IDLE"].includes(String(item.state).toUpperCase()))
       ? this.#profileQueueId
       : null;
-    const activeId = playingId ?? retainedPaused;
+    const activeId = playingId ?? retainedInactive;
     if (!activeId) return null;
     const snapshot = await this.queueSnapshot(activeId);
     if (snapshot) this.#profileQueueId = snapshot.sourcePlayerId;

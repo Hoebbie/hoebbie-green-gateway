@@ -15,6 +15,7 @@ const homeAssistantUrl = required("HOME_ASSISTANT_URL").replace(/\/$/, "");
 const homeAssistantToken = required("HOME_ASSISTANT_ACCESS_TOKEN");
 const gatewayUrl = required("HOEBBIE_GATEWAY_URL").replace(/\/$/, "");
 const gatewayKeyPath = "/data/hoebbie_gateway_key";
+const profileQueuePath = "/data/hoebbie_profile_queue_id";
 
 function gatewayKeyFromPersistentStorage() {
   if (existsSync(gatewayKeyPath)) {
@@ -31,6 +32,19 @@ function gatewayKeyFromPersistentStorage() {
 const gatewayKey = gatewayKeyFromPersistentStorage();
 const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
 
+function persistedProfileQueueId() {
+  if (!existsSync(profileQueuePath)) return null;
+  const value = readFileSync(profileQueuePath, "utf8").trim();
+  return /^[A-Za-z0-9:._/-]{1,200}$/.test(value) ? value : null;
+}
+
+function persistProfileQueueId(value) {
+  // Player identifiers remain local to the add-on data volume and are never
+  // put in logs, broadcasts or the mobile response.
+  writeFileSync(profileQueuePath, `${value}\n`, { encoding: "utf8", mode: 0o600 });
+  chmodSync(profileQueuePath, 0o600);
+}
+
 function musicAssistantClientFromEnvironment() {
   const baseUrl = process.env.MUSIC_ASSISTANT_URL?.trim() ?? "";
   const accessToken = process.env.MUSIC_ASSISTANT_ACCESS_TOKEN?.trim() ?? "";
@@ -40,6 +54,8 @@ function musicAssistantClientFromEnvironment() {
 }
 
 const musicAssistant = musicAssistantClientFromEnvironment();
+
+if (musicAssistant) musicAssistant.restoreProfileQueue(persistedProfileQueueId());
 
 if (!gatewayUrl.startsWith("https://") || homeAssistantToken.length < 24) throw new Error("Die Green-Gateway-Konfiguration ist ungültig.");
 
@@ -87,6 +103,7 @@ async function reportMusicAssistantDiscovery() {
   if (snapshot) {
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error("gateway.music_profile_snapshot_report_failed");
+    persistProfileQueueId(snapshot.sourcePlayerId);
   }
   const available = players.filter((player) => player.available).length;
   const playing = players.filter((player) => player.isPlaying).length;

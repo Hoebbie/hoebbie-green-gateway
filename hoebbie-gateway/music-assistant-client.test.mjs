@@ -138,6 +138,19 @@ test("retains the confirmed profile queue to publish a pause without guessing an
   assert.equal(paused.progressSeconds, 61);
 });
 
+test("restores only a valid profile queue after Green restarts and publishes its paused state", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([
+    { current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "paused" },
+    { current_item: { duration: 240, name: "Anderer Titel" }, elapsed_time: 12, queue_id: "sonos:dining", state: "paused" }
+  ]), { status: 200 }));
+
+  assert.equal(client.restoreProfileQueue("invalid queue id"), false);
+  assert.equal(client.restoreProfileQueue("sonos:kitchen"), true);
+  const paused = await client.activeQueueSnapshot();
+  assert.equal(paused.sourcePlayerId, "sonos:kitchen");
+  assert.equal(paused.isPlaying, false);
+});
+
 test("transfers only a bounded queue and confirms its target", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {
