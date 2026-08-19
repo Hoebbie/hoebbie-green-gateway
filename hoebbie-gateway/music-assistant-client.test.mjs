@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -155,11 +155,20 @@ test("rejects malformed queue registry responses", async () => {
 });
 
 test("normalizes only the active queue snapshot and keeps a public Spotify cover", async () => {
-  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, elapsed_time_last_updated: 1787000400, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
+  const sourceSeconds = Date.now() / 1_000;
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, elapsed_time_last_updated: sourceSeconds, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
   const snapshot = await client.activeQueueSnapshot();
   assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, observedAt: undefined, progressSeconds: 61, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
-  assert.equal(snapshot.sourceTime, "2026-08-17T21:00:00.000Z");
+  assert.equal(snapshot.sourceTime, new Date(sourceSeconds * 1_000).toISOString());
+});
+
+test("omits stale or future queue clocks instead of fabricating realtime", () => {
+  const observedAt = "2026-08-19T17:00:00.000Z";
+  assert.equal(verifiedQueueSourceTime("2026-08-19T16:54:59.999Z", observedAt, true), null);
+  assert.equal(verifiedQueueSourceTime("2026-08-19T17:01:00.001Z", observedAt, true), null);
+  assert.equal(verifiedQueueSourceTime("2026-08-19T16:59:00.000Z", observedAt, false), null);
+  assert.equal(verifiedQueueSourceTime("2026-08-19T16:59:00.000Z", observedAt, true), "2026-08-19T16:59:00.000Z");
 });
 
 test("does not expose local or credentialed artwork paths", async () => {

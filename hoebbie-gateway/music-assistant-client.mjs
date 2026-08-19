@@ -151,6 +151,22 @@ function spotifyArtworkRef(value) {
   }
 }
 
+/** Accepts Music Assistant's queue clock only when it can be tied to the
+ * freshly observed playing snapshot. A stale or future value is omitted; the
+ * mobile UI then stays static instead of pretending to know realtime. */
+export function verifiedQueueSourceTime(value, observedAt, isPlaying) {
+  if (!isPlaying) return null;
+  const observedMilliseconds = Date.parse(observedAt);
+  const sourceMilliseconds = typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value * 1_000
+    : typeof value === "string" && Number.isFinite(Date.parse(value))
+      ? Date.parse(value)
+      : NaN;
+  if (!Number.isFinite(observedMilliseconds) || !Number.isFinite(sourceMilliseconds)) return null;
+  if (sourceMilliseconds > observedMilliseconds + 60_000 || sourceMilliseconds < observedMilliseconds - 300_000) return null;
+  return new Date(sourceMilliseconds).toISOString();
+}
+
 function playerFromResponse(value) {
   if (!value || typeof value !== "object") return null;
   const id = playerId(value.player_id);
@@ -298,13 +314,6 @@ export class MusicAssistantClient {
     const current = queue.current_item && typeof queue.current_item === "object" ? queue.current_item : {};
     const text = (value) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
     const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
-    // Music Assistant exposes the queue clock as epoch seconds. Keep it as an
-    // explicit source time; the mobile app must not derive it from event gaps.
-    const sourceTime = (value) => {
-      if (typeof value === "number" && Number.isFinite(value) && value > 0) return new Date(value * 1_000).toISOString();
-      if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
-      return null;
-    };
     const sourcePlayerId = playerId(queue.queue_id);
     if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
     const artworkCandidates = [
@@ -315,7 +324,9 @@ export class MusicAssistantClient {
       current.album?.image?.url
     ];
     const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
-    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", observedAt: new Date().toISOString(), progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, sourceTime: sourceTime(queue.elapsed_time_last_updated), title: text(current.name ?? current.title) };
+    const isPlaying = String(queue.state).toUpperCase() === "PLAYING";
+    const observedAt = new Date().toISOString();
+    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, observedAt, progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
   }
 
   async activeQueueSnapshot() {

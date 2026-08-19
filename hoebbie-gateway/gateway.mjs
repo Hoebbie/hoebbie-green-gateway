@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
-import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
+import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
 import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
@@ -118,6 +118,12 @@ async function reportMusicAssistantDiscovery() {
   console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
 }
 
+const musicDiscoveryReporter = new CoalescedAsyncTask({
+  delayMilliseconds: 250,
+  onError: (error) => console.error(safeGatewayError(error, "music_assistant.live_state_report_failed")),
+  run: reportMusicAssistantDiscovery
+});
+
 let lastMusicAssistantContractEventAt = null;
 const musicAssistantRealtime = musicAssistant
   ? new MusicAssistantRealtime(musicAssistant.config, ({ eventType, timingAnchor }) => {
@@ -127,7 +133,7 @@ const musicAssistantRealtime = musicAssistant
     const gapMilliseconds = lastMusicAssistantContractEventAt === null ? null : Math.max(0, now - lastMusicAssistantContractEventAt);
     lastMusicAssistantContractEventAt = now;
     console.info(`music_assistant.contract_event:${eventType},timing_anchor=${timingAnchor},gap_ms=${gapMilliseconds ?? "first"}`);
-    void reportMusicAssistantDiscovery().catch((error) => console.error(safeGatewayError(error, "music_assistant.live_state_report_failed")));
+    void musicDiscoveryReporter.request();
   })
   : null;
 
@@ -455,7 +461,7 @@ async function runMusicGroupOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_group_completion_failed");
-  await reportMusicAssistantDiscovery();
+  await musicDiscoveryReporter.request();
   return true;
 }
 
@@ -475,7 +481,7 @@ async function runMusicProfileTransferOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_profile_transfer_completion_failed");
-  await reportMusicAssistantDiscovery();
+  await musicDiscoveryReporter.request();
   return true;
 }
 
@@ -584,7 +590,7 @@ async function drainDeviceCommands() {
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
     }
     if (Date.now() >= nextMusicInventoryAt) {
-      await reportMusicAssistantDiscovery();
+      await musicDiscoveryReporter.request();
       nextMusicInventoryAt = Date.now() + 60_000;
     }
   } catch (error) {
