@@ -108,7 +108,7 @@ async function reportMusicAssistantDiscovery() {
   }
   const snapshot = await musicAssistant.activeQueueSnapshot();
   if (snapshot) {
-    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, nextTracks: snapshot.nextTracks, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     persistProfileQueueId(snapshot.sourcePlayerId);
   }
