@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -223,6 +223,21 @@ test("transfers only a bounded queue and confirms its target", async () => {
   assert.equal((await client.transferQueue({ commandId: "command", sourcePlayerId: "sonos:kitchen", targetPlayerId: "sonos:dining" })).sourcePlayerId, "sonos:dining");
   assert.deepEqual(calls.map((call) => call.command), ["players/get", "players/get", "player_queues/transfer", "player_queues/all", "players/get"]);
   assert.deepEqual(calls[2], { args: { auto_play: true, source_queue_id: "sonos:kitchen", target_queue_id: "sonos:dining" }, command: "player_queues/transfer", message_id: "3" });
+});
+
+test("groups all rooms around the confirmed profile queue and returns the unchanged snapshot", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+    if (request.command === "players/cmd/group") return new Response("null", { status: 200 });
+    const follower = request.args.player_id !== "sonos:kitchen";
+    return new Response(JSON.stringify({ available: true, group_members: follower ? [] : ["sonos:kitchen", "sonos:dining"], name: request.args.player_id, player_id: request.args.player_id, playback_state: "playing", powered: true, synced_to: follower ? "sonos:kitchen" : null }), { status: 200 });
+  });
+  const command = { commandId: "command", memberPlayerIds: ["sonos:kitchen", "sonos:dining"], sourcePlayerId: "sonos:kitchen" };
+  assert.equal(validMusicAllRoomsCommand(command), true);
+  assert.equal((await client.groupAllRooms(command)).title, "Titel");
+  assert.deepEqual(calls.map((call) => call.command), ["player_queues/all", "players/cmd/group", "players/get", "players/get", "player_queues/all"]);
 });
 
 test("keeps a paused source paused when transferring its queue", async () => {

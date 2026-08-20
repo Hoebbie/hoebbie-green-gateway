@@ -68,6 +68,19 @@ export function validMusicQueueTransferCommand(command) {
     && command.sourcePlayerId !== command.targetPlayerId);
 }
 
+export function validMusicAllRoomsCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.sourcePlayerId === "string"
+    && playerId(command.sourcePlayerId)
+    && Array.isArray(command.memberPlayerIds)
+    && command.memberPlayerIds.length >= 2
+    && command.memberPlayerIds.length <= 8
+    && command.memberPlayerIds.every((id) => typeof id === "string" && playerId(id))
+    && new Set(command.memberPlayerIds).size === command.memberPlayerIds.length
+    && command.memberPlayerIds.includes(command.sourcePlayerId));
+}
+
 export function validMusicSeekCommand(command) {
   return Boolean(command && typeof command.commandId === "string" && typeof command.sourcePlayerId === "string" && playerId(command.sourcePlayerId) && Number.isInteger(command.targetSeconds) && command.targetSeconds >= 0);
 }
@@ -503,6 +516,16 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.group_verification_failed", "Music Assistant hat die neue Gruppenzugehörigkeit nicht bestätigt.");
+  }
+
+  async groupAllRooms(command) {
+    if (!validMusicAllRoomsCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_all_rooms", "Der freigegebene Alle-Räume-Auftrag ist ungültig.");
+    const before = await this.queueSnapshot(command.sourcePlayerId);
+    if (!before?.title) throw new MusicAssistantGatewayError("music_assistant.all_rooms_queue_unavailable", "Die aktuelle Wiedergabe konnte nicht bestätigt werden.");
+    await this.groupPlayers({ commandId: command.commandId, leaderPlayerId: command.sourcePlayerId, memberPlayerIds: command.memberPlayerIds, operation: "group" });
+    const after = await this.queueSnapshot(command.sourcePlayerId);
+    if (!after?.title || after.sourcePlayerId !== command.sourcePlayerId || after.title !== before.title || after.artist !== before.artist) throw new MusicAssistantGatewayError("music_assistant.all_rooms_queue_changed", "Music Assistant hat nach der Gruppierung eine andere Wiedergabe gemeldet.");
+    return after;
   }
 
   async ungroupPlayers(command) {

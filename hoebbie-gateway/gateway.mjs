@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
 import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
@@ -485,6 +485,20 @@ async function runMusicProfileTransferOnce() {
   return true;
 }
 
+async function runMusicProfileAllRoomsOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_all_rooms_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicAllRoomsCommand(command)) throw new Error("gateway.music_profile_all_rooms_claim_invalid");
+  let completion;
+  try { completion = { commandId: command.commandId, mode: "music_profile_all_rooms_complete", snapshot: await withinDeadline(musicAssistant.groupAllRooms(command), 15_000, "music_assistant.all_rooms_timeout"), success: true }; }
+  catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_all_rooms_complete", success: false }; }
+  await reportCommandCompletion(completion, "gateway.music_profile_all_rooms_completion_failed");
+  await musicDiscoveryReporter.request();
+  return true;
+}
+
 async function runMusicProfileSeekOnce() {
   if (!musicAssistant) return false;
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_seek_claim" }) });
@@ -588,6 +602,7 @@ const musicProfileTransferCommandDrain = new BoundedQueueDrain({
   onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"),
   onLimit: () => console.error("Der Music-Assistant-Gateway hat die Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
 });
+const musicProfileAllRoomsCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileAllRoomsOnce, onClaimed: (count) => console.info(`gateway.music_profile_all_rooms_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Alle-Räume-Auftragsgrenze erreicht.") });
 const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSeekOnce, onClaimed: (count) => console.info(`gateway.music_profile_seek_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Seek-Auftragsgrenze erreicht.") });
 const musicProfileSkipCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSkipOnce, onClaimed: (count) => console.info(`gateway.music_profile_skip_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Skip-Auftragsgrenze erreicht.") });
 const musicProfileShuffleCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileShuffleOnce, onClaimed: (count) => console.info(`gateway.music_profile_shuffle_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Shuffle-Auftragsgrenze erreicht.") });
@@ -635,6 +650,7 @@ function drainCommands() {
   void musicCommandDrain.request();
   void musicVolumeCommandDrain.request();
   void musicProfileTransferCommandDrain.request();
+  void musicProfileAllRoomsCommandDrain.request();
   void musicProfileSeekCommandDrain.request();
   void musicProfileSkipCommandDrain.request();
   void musicProfileShuffleCommandDrain.request();
