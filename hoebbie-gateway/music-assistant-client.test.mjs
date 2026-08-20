@@ -156,9 +156,13 @@ test("rejects malformed queue registry responses", async () => {
 
 test("normalizes only the active queue snapshot and keeps a public Spotify cover", async () => {
   const sourceSeconds = Date.now() / 1_000;
-  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, elapsed_time_last_updated: sourceSeconds, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 }));
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.command === "player_queues/items") return new Response(JSON.stringify([{ media_item: { artists: [{ name: "Danach" }], image: { url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }, name: "Nächster Titel" } }]), { status: 200 });
+    return new Response(JSON.stringify([{ current_index: 2, current_item: { album: { images: [{ url: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228" }], name: "Album" }, artists: [{ name: "Künstler" }], duration: 240, name: "Titel" }, elapsed_time: 61.9, elapsed_time_last_updated: sourceSeconds, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+  });
   const snapshot = await client.activeQueueSnapshot();
-  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
+  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, nextTracks: [{ artist: "Danach", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", title: "Nächster Titel" }], observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
   assert.equal(snapshot.sourceTime, new Date(sourceSeconds * 1_000).toISOString());
 });
@@ -179,7 +183,7 @@ test("does not expose local or credentialed artwork paths", async () => {
 test("reads a paused target queue without treating it as playing", async () => {
   const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { duration: 240, name: "Titel" }, elapsed_time: 61, queue_id: "sonos:kitchen", state: "paused" }]), { status: 200 }));
   const snapshot = await client.queueSnapshot("sonos:kitchen");
-  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: null, artist: null, artworkRef: null, durationSeconds: 240, isPlaying: false, observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
+  assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: null, artist: null, artworkRef: null, durationSeconds: 240, isPlaying: false, nextTracks: [], observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
   assert.equal(snapshot.sourceTime, null);
 });
@@ -298,8 +302,8 @@ test("advances only through the fixed queue command and verifies the queue index
   const snapshot = await client.skipQueue({ commandId: "command", direction: "next", sourcePlayerId: "sonos:kitchen" });
   assert.equal(snapshot.title, "Titel B");
   assert.equal("queueIndex" in snapshot, false);
-  assert.deepEqual(calls.map((call) => call.command), ["player_queues/all", "player_queues/next", "player_queues/all"]);
-  assert.deepEqual(calls[1].args, { queue_id: "sonos:kitchen" });
+  assert.deepEqual(calls.map((call) => call.command), ["player_queues/all", "player_queues/items", "player_queues/next", "player_queues/all", "player_queues/items"]);
+  assert.deepEqual(calls[2].args, { queue_id: "sonos:kitchen" });
 });
 
 test("confirms previous when Music Assistant restarts the current title", async () => {

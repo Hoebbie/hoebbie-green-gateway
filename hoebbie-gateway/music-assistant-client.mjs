@@ -181,6 +181,25 @@ function spotifyArtworkRef(value) {
   }
 }
 
+/** Reduces a Music Assistant queue item to the three display values which may
+ * leave Green. Queue/provider identifiers and arbitrary artwork URLs remain
+ * local. */
+function queuePresentationItem(value) {
+  if (!value || typeof value !== "object") return null;
+  const media = value.media_item && typeof value.media_item === "object" ? value.media_item : value;
+  const title = mediaLabel(media.name ?? media.title);
+  if (!title) return null;
+  const artist = mediaLabel(media.artists?.[0]?.name ?? media.artist?.name ?? media.artist);
+  const artworkCandidates = [
+    media.image?.path,
+    media.image?.url,
+    media.album?.images?.[0]?.url,
+    media.album?.image?.path,
+    media.album?.image?.url
+  ];
+  return { artist, artworkRef: artworkCandidates.map(spotifyArtworkRef).find((item) => item !== null) ?? null, title };
+}
+
 /** Accepts Music Assistant's queue clock only when it can be tied to the
  * freshly observed playing snapshot. A stale or future value is omitted; the
  * mobile UI then stays static instead of pretending to know realtime. */
@@ -356,8 +375,24 @@ export class MusicAssistantClient {
     const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
     const isPlaying = String(queue.state).toUpperCase() === "PLAYING";
     const observedAt = new Date().toISOString();
-    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
-    return includeQueueIndex ? { ...snapshot, queueIndex: Number.isInteger(queue.current_index) && queue.current_index >= 0 ? queue.current_index : null } : snapshot;
+    const currentIndex = Number.isInteger(queue.current_index) && queue.current_index >= 0 ? queue.current_index : null;
+    const nextTracks = currentIndex === null ? [] : await this.nextQueueItems(sourcePlayerId, currentIndex);
+    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, nextTracks, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
+    return includeQueueIndex ? { ...snapshot, queueIndex: currentIndex } : snapshot;
+  }
+
+  /** Reads at most five following items from Music Assistant's documented
+   * queue endpoint. A version mismatch or malformed response is an empty,
+   * explicitly unconfirmed list – never a playback failure. */
+  async nextQueueItems(queueId, currentIndex) {
+    const result = await this.command("player_queues/items", { limit: 5, offset: currentIndex + 1, queue_id: queueId });
+    const items = Array.isArray(result.payload)
+      ? result.payload
+      : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result)
+        ? result.payload.result
+        : null;
+    if (!result.ok || !items) return [];
+    return items.slice(0, 5).map(queuePresentationItem).filter((item) => item !== null);
   }
 
   async activeQueueSnapshot() {
