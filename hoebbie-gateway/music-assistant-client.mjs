@@ -37,11 +37,12 @@ export function validMusicCommand(command) {
 export function validMusicVolumeCommand(command) {
   return Boolean(command
     && typeof command.commandId === "string"
-    && typeof command.playerId === "string"
-    && playerId(command.playerId)
-    && Number.isInteger(command.targetVolume)
-    && command.targetVolume >= 0
-    && command.targetVolume <= 100);
+    && Array.isArray(command.playerIds)
+    && Array.isArray(command.targetVolumes)
+    && command.playerIds.length >= 1
+    && command.playerIds.length === command.targetVolumes.length
+    && command.playerIds.every((id) => typeof id === "string" && playerId(id))
+    && command.targetVolumes.every((volume) => Number.isInteger(volume) && volume >= 0 && volume <= 100));
 }
 
 export function validMusicGroupCommand(command) {
@@ -68,8 +69,37 @@ export function validMusicQueueTransferCommand(command) {
     && command.sourcePlayerId !== command.targetPlayerId);
 }
 
+export function validMusicAllRoomsCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.sourcePlayerId === "string"
+    && playerId(command.sourcePlayerId)
+    && Array.isArray(command.memberPlayerIds)
+    && command.memberPlayerIds.length >= 2
+    && command.memberPlayerIds.length <= 8
+    && command.memberPlayerIds.every((id) => typeof id === "string" && playerId(id))
+    && new Set(command.memberPlayerIds).size === command.memberPlayerIds.length
+    && command.memberPlayerIds.includes(command.sourcePlayerId));
+}
+
 export function validMusicSeekCommand(command) {
   return Boolean(command && typeof command.commandId === "string" && typeof command.sourcePlayerId === "string" && playerId(command.sourcePlayerId) && Number.isInteger(command.targetSeconds) && command.targetSeconds >= 0);
+}
+
+export function validMusicSkipCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.sourcePlayerId === "string"
+    && playerId(command.sourcePlayerId)
+    && (command.direction === "previous" || command.direction === "next"));
+}
+
+export function validMusicShuffleCommand(command) {
+  return Boolean(command
+    && typeof command.commandId === "string"
+    && typeof command.sourcePlayerId === "string"
+    && playerId(command.sourcePlayerId)
+    && typeof command.shuffleEnabled === "boolean");
 }
 
 export function validMusicStartCommand(command) {
@@ -150,6 +180,41 @@ function spotifyArtworkRef(value) {
   } catch {
     return null;
   }
+}
+
+/** Reduces a Music Assistant queue item to the three display values which may
+ * leave Green. Queue/provider identifiers and arbitrary artwork URLs remain
+ * local. */
+function queuePresentationItem(value) {
+  if (!value || typeof value !== "object") return null;
+  const media = value.media_item && typeof value.media_item === "object" ? value.media_item : value;
+  const title = mediaLabel(media.name ?? media.title);
+  if (!title) return null;
+  const artist = mediaLabel(media.artists?.[0]?.name ?? media.artist?.name ?? media.artist);
+  const artworkCandidates = [
+    media.image?.path,
+    media.image?.url,
+    media.album?.images?.[0]?.url,
+    media.album?.image?.path,
+    media.album?.image?.url
+  ];
+  return { artist, artworkRef: artworkCandidates.map(spotifyArtworkRef).find((item) => item !== null) ?? null, title };
+}
+
+/** Accepts Music Assistant's queue clock only when it can be tied to the
+ * freshly observed playing snapshot. A stale or future value is omitted; the
+ * mobile UI then stays static instead of pretending to know realtime. */
+export function verifiedQueueSourceTime(value, observedAt, isPlaying) {
+  if (!isPlaying) return null;
+  const observedMilliseconds = Date.parse(observedAt);
+  const sourceMilliseconds = typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value * 1_000
+    : typeof value === "string" && Number.isFinite(Date.parse(value))
+      ? Date.parse(value)
+      : NaN;
+  if (!Number.isFinite(observedMilliseconds) || !Number.isFinite(sourceMilliseconds)) return null;
+  if (sourceMilliseconds > observedMilliseconds + 60_000 || sourceMilliseconds < observedMilliseconds - 300_000) return null;
+  return new Date(sourceMilliseconds).toISOString();
 }
 
 function playerFromResponse(value) {
@@ -302,7 +367,7 @@ export class MusicAssistantClient {
 
   /** Returns only a normalized queue snapshot for a fixed player. It never
    * logs or exposes the full queue. */
-  async queueSnapshot(playerIdToRead) {
+  async queueSnapshot(playerIdToRead, includeQueueIndex = false) {
     if (!playerId(playerIdToRead)) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige Queue geliefert.");
     const result = await this.command("player_queues/all", {});
     const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
@@ -312,13 +377,6 @@ export class MusicAssistantClient {
     const current = queue.current_item && typeof queue.current_item === "object" ? queue.current_item : {};
     const text = (value) => typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : null;
     const seconds = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : null;
-    // Music Assistant exposes the queue clock as epoch seconds. Keep it as an
-    // explicit source time; the mobile app must not derive it from event gaps.
-    const sourceTime = (value) => {
-      if (typeof value === "number" && Number.isFinite(value) && value > 0) return new Date(value * 1_000).toISOString();
-      if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
-      return null;
-    };
     const sourcePlayerId = playerId(queue.queue_id);
     if (!sourcePlayerId) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige aktive Queue geliefert.");
     const artworkCandidates = [
@@ -329,7 +387,26 @@ export class MusicAssistantClient {
       current.album?.image?.url
     ];
     const artworkRef = artworkCandidates.map(spotifyArtworkRef).find((value) => value !== null) ?? null;
-    return { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying: String(queue.state).toUpperCase() === "PLAYING", observedAt: new Date().toISOString(), progressSeconds: seconds(queue.elapsed_time), sourcePlayerId, sourceTime: sourceTime(queue.elapsed_time_last_updated), title: text(current.name ?? current.title) };
+    const isPlaying = String(queue.state).toUpperCase() === "PLAYING";
+    const observedAt = new Date().toISOString();
+    const currentIndex = Number.isInteger(queue.current_index) && queue.current_index >= 0 ? queue.current_index : null;
+    const nextTracks = currentIndex === null ? [] : await this.nextQueueItems(sourcePlayerId, currentIndex);
+    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, nextTracks, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
+    return includeQueueIndex ? { ...snapshot, queueIndex: currentIndex } : snapshot;
+  }
+
+  /** Reads at most five following items from Music Assistant's documented
+   * queue endpoint. A version mismatch or malformed response is an empty,
+   * explicitly unconfirmed list – never a playback failure. */
+  async nextQueueItems(queueId, currentIndex) {
+    const result = await this.command("player_queues/items", { limit: 5, offset: currentIndex + 1, queue_id: queueId });
+    const items = Array.isArray(result.payload)
+      ? result.payload
+      : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result)
+        ? result.payload.result
+        : null;
+    if (!result.ok || !items) return [];
+    return items.slice(0, 5).map(queuePresentationItem).filter((item) => item !== null);
   }
 
   async activeQueueSnapshot() {
@@ -386,6 +463,43 @@ export class MusicAssistantClient {
     throw new MusicAssistantGatewayError("music_assistant.seek_verification_failed", "Music Assistant hat den Zeitpunkt nicht bestätigt.");
   }
 
+  /** Executes one fixed queue navigation action and returns only after Music
+   * Assistant exposes a plausibly changed queue. The internal queue index is
+   * used locally for verification and is removed from the returned snapshot. */
+  async skipQueue(command) {
+    if (!validMusicSkipCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_skip", "Der freigegebene Titelwechsel ist ungültig.");
+    const before = await this.queueSnapshot(command.sourcePlayerId, true);
+    if (!before?.title) throw new MusicAssistantGatewayError("music_assistant.skip_unavailable", "Für den Titelwechsel ist keine bestätigte Queue vorhanden.");
+    const result = await this.command(`player_queues/${command.direction}`, { queue_id: command.sourcePlayerId });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.skip_failed", "Music Assistant hat den Titelwechsel nicht ausgeführt.");
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const after = await this.queueSnapshot(command.sourcePlayerId, true);
+      const indexChanged = before.queueIndex !== null && after?.queueIndex !== null && before.queueIndex !== after.queueIndex;
+      const mediaChanged = Boolean(after?.title && (after.title !== before.title || after.artist !== before.artist || after.durationSeconds !== before.durationSeconds));
+      const restarted = command.direction === "previous" && before.progressSeconds !== null && after?.progressSeconds !== null && before.progressSeconds >= 3 && after.progressSeconds <= Math.max(2, before.progressSeconds - 2);
+      if (after?.sourcePlayerId === command.sourcePlayerId && after.title && (indexChanged || mediaChanged || restarted)) {
+        const { queueIndex: _queueIndex, ...snapshot } = after;
+        return snapshot;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.skip_verification_failed", "Music Assistant hat den Titelwechsel nicht bestätigt.");
+  }
+
+  /** Sets the one server-derived playlist shuffle state and confirms it by
+   * reading the same Music Assistant queue back. */
+  async setShuffle(command) {
+    if (!validMusicShuffleCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_shuffle", "Der freigegebene Shuffle-Auftrag ist ungültig.");
+    const result = await this.command("player_queues/shuffle", { queue_id: command.sourcePlayerId, shuffle_enabled: command.shuffleEnabled });
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.shuffle_failed", "Music Assistant hat Shuffle nicht gesetzt.");
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const snapshot = await this.queueSnapshot(command.sourcePlayerId);
+      if (snapshot?.sourcePlayerId === command.sourcePlayerId && snapshot.title && snapshot.shuffleEnabled === command.shuffleEnabled) return snapshot;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.shuffle_verification_failed", "Music Assistant hat Shuffle nicht bestätigt.");
+  }
+
   /** Replaces one fixed target queue with the server-authorized media URI and
    * returns only after the target is observed playing. The URI never appears
    * in logs, snapshots or mobile responses. */
@@ -427,7 +541,7 @@ export class MusicAssistantClient {
   }
 
   async setVolume(command) {
-    if (!validMusicVolumeCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Lautstärkeauftrag ist ungültig.");
+    if (!command || typeof command.playerId !== "string" || !playerId(command.playerId) || !Number.isInteger(command.targetVolume) || command.targetVolume < 0 || command.targetVolume > 100) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Lautstärkeauftrag ist ungültig.");
     const actionResult = await this.command("players/cmd/volume_set", { player_id: command.playerId, volume_level: command.targetVolume });
     if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.command_failed", "Music Assistant hat den Lautstärkeauftrag nicht ausgeführt.");
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -436,6 +550,13 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.verification_failed", "Music Assistant hat die neue Lautstärke nicht bestätigt.");
+  }
+
+  async setVolumes(command) {
+    if (!validMusicVolumeCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Gruppenlautstärkeauftrag ist ungültig.");
+    const observed = [];
+    for (let index = 0; index < command.playerIds.length; index += 1) observed.push(await this.setVolume({ playerId: command.playerIds[index], targetVolume: command.targetVolumes[index] }));
+    return observed;
   }
 
   async groupPlayers(command) {
@@ -452,6 +573,16 @@ export class MusicAssistantClient {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     throw new MusicAssistantGatewayError("music_assistant.group_verification_failed", "Music Assistant hat die neue Gruppenzugehörigkeit nicht bestätigt.");
+  }
+
+  async groupAllRooms(command) {
+    if (!validMusicAllRoomsCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_all_rooms", "Der freigegebene Alle-Räume-Auftrag ist ungültig.");
+    const before = await this.queueSnapshot(command.sourcePlayerId);
+    if (!before?.title) throw new MusicAssistantGatewayError("music_assistant.all_rooms_queue_unavailable", "Die aktuelle Wiedergabe konnte nicht bestätigt werden.");
+    await this.groupPlayers({ commandId: command.commandId, leaderPlayerId: command.sourcePlayerId, memberPlayerIds: command.memberPlayerIds, operation: "group" });
+    const after = await this.queueSnapshot(command.sourcePlayerId);
+    if (!after?.title || after.sourcePlayerId !== command.sourcePlayerId || after.title !== before.title || after.artist !== before.artist) throw new MusicAssistantGatewayError("music_assistant.all_rooms_queue_changed", "Music Assistant hat nach der Gruppierung eine andere Wiedergabe gemeldet.");
+    return after;
   }
 
   async ungroupPlayers(command) {
@@ -494,10 +625,13 @@ export class MusicAssistantClient {
     }
     return {
       group: document.includes("players/cmd/group"),
+      next: document.includes("player_queues/next"),
       playMedia: document.includes("player_queues/play_media"),
+      previous: document.includes("player_queues/previous"),
       queueGet: document.includes("player_queues/get"),
       queueTransfer: document.includes("player_queues/transfer"),
       setMembers: document.includes("players/cmd/set_members"),
+      shuffle: document.includes("player_queues/shuffle"),
       ungroup: document.includes("players/cmd/ungroup")
     };
   }

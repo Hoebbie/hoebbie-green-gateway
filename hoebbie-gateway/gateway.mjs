@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { MusicAssistantClient, MusicAssistantRealtime, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
-import { BoundedQueueDrain, withinDeadline } from "./queue-drain.mjs";
+import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
+import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -72,7 +73,7 @@ async function reportMusicAssistantGroupCapabilities() {
   const capabilities = await musicAssistant.groupCapabilities();
   // These booleans describe only the generated documentation shell. They are
   // never treated as a feature decision because MA's HTML can omit commands.
-  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},play_media=${capabilities.playMedia},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},ungroup=${capabilities.ungroup}`);
+  console.info(`music_assistant.api_docs_shell:group=${capabilities.group},next=${capabilities.next},play_media=${capabilities.playMedia},previous=${capabilities.previous},queue_get=${capabilities.queueGet},queue_transfer=${capabilities.queueTransfer},set_members=${capabilities.setMembers},shuffle=${capabilities.shuffle},ungroup=${capabilities.ungroup}`);
   const queueRegistryAvailable = await musicAssistant.queueRegistryAvailable();
   // No queue, title, media id or player identifier is logged or persisted.
   console.info(`music_assistant.queue_registry_readable=${queueRegistryAvailable}`);
@@ -107,8 +108,8 @@ async function reportMusicAssistantDiscovery() {
   }
   const snapshot = await musicAssistant.activeQueueSnapshot();
   if (snapshot) {
-    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
-    if (!sessionReported.ok) throw new Error("gateway.music_profile_snapshot_report_failed");
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, nextTracks: snapshot.nextTracks, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
+    if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     persistProfileQueueId(snapshot.sourcePlayerId);
   }
   const available = players.filter((player) => player.available).length;
@@ -116,6 +117,12 @@ async function reportMusicAssistantDiscovery() {
   // Logs deliberately contain neither player ids/names nor credentials.
   console.info(`music_assistant.discovery:available=${available},playing=${playing}`);
 }
+
+const musicDiscoveryReporter = new CoalescedAsyncTask({
+  delayMilliseconds: 250,
+  onError: (error) => console.error(safeGatewayError(error, "music_assistant.live_state_report_failed")),
+  run: reportMusicAssistantDiscovery
+});
 
 let lastMusicAssistantContractEventAt = null;
 const musicAssistantRealtime = musicAssistant
@@ -126,7 +133,7 @@ const musicAssistantRealtime = musicAssistant
     const gapMilliseconds = lastMusicAssistantContractEventAt === null ? null : Math.max(0, now - lastMusicAssistantContractEventAt);
     lastMusicAssistantContractEventAt = now;
     console.info(`music_assistant.contract_event:${eventType},timing_anchor=${timingAnchor},gap_ms=${gapMilliseconds ?? "first"}`);
-    void reportMusicAssistantDiscovery().catch(() => console.error("music_assistant.live_state_report_failed"));
+    void musicDiscoveryReporter.request();
   })
   : null;
 
@@ -191,16 +198,19 @@ async function request(url, options) {
 }
 
 async function reportCommandCompletion(completion, failureCode) {
+  let lastFailure = failureCode;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const reported = await withinDeadline(request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) }), 4_000, failureCode);
       if (reported.ok) return;
-    } catch {
+      lastFailure = await safeGatewayResponseFailure(reported, failureCode);
+    } catch (error) {
       // A lost response is safe to retry because completion RPCs are
       // idempotent for the same final state.
+      lastFailure = safeGatewayError(error, failureCode);
     }
   }
-  throw new Error(failureCode);
+  throw new Error(lastFailure);
 }
 
 async function resolvePilotEntityId() {
@@ -219,12 +229,7 @@ async function resolvePilotEntityId() {
 
 const pilotEntityId = await resolvePilotEntityId();
 console.log("D2-Pilot „Kugel“ wurde lokal erkannt.");
-await reportMusicAssistantDiscovery().catch((error) => {
-  const code = error && typeof error === "object" && typeof error.code === "string"
-    ? error.code
-    : "music_assistant.discovery_unavailable";
-  console.error(code);
-});
+await reportMusicAssistantDiscovery().catch((error) => console.error(safeGatewayError(error, "music_assistant.discovery_unavailable")));
 
 function discoveredEntity(state, areaNames) {
   if (typeof state?.entity_id !== "string") return null;
@@ -426,7 +431,7 @@ async function runMusicVolumeOnce() {
     completion = {
       commandId: command.commandId,
       mode: "music_volume_complete",
-      observedVolume: await withinDeadline(musicAssistant.setVolume(command), 7_000, "music_assistant.command_timeout"),
+      observedVolumes: await withinDeadline(musicAssistant.setVolumes(command), 14_000, "music_assistant.command_timeout"),
       success: true
     };
   } catch (error) {
@@ -456,7 +461,7 @@ async function runMusicGroupOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_group_completion_failed");
-  await reportMusicAssistantDiscovery();
+  await musicDiscoveryReporter.request();
   return true;
 }
 
@@ -476,7 +481,21 @@ async function runMusicProfileTransferOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_profile_transfer_completion_failed");
-  await reportMusicAssistantDiscovery();
+  await musicDiscoveryReporter.request();
+  return true;
+}
+
+async function runMusicProfileAllRoomsOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_all_rooms_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicAllRoomsCommand(command)) throw new Error("gateway.music_profile_all_rooms_claim_invalid");
+  let completion;
+  try { completion = { commandId: command.commandId, mode: "music_profile_all_rooms_complete", snapshot: await withinDeadline(musicAssistant.groupAllRooms(command), 15_000, "music_assistant.all_rooms_timeout"), success: true }; }
+  catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_all_rooms_complete", success: false }; }
+  await reportCommandCompletion(completion, "gateway.music_profile_all_rooms_completion_failed");
+  await musicDiscoveryReporter.request();
   return true;
 }
 
@@ -491,6 +510,32 @@ async function runMusicProfileSeekOnce() {
   catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_seek_complete", success: false }; }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_profile_seek_completion_failed");
+  return true;
+}
+
+async function runMusicProfileSkipOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_skip_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicSkipCommand(command)) throw new Error("gateway.music_profile_skip_claim_invalid");
+  let completion;
+  try { completion = { commandId: command.commandId, mode: "music_profile_skip_complete", snapshot: await withinDeadline(musicAssistant.skipQueue(command), 12_000, "music_assistant.skip_timeout"), success: true }; }
+  catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_skip_complete", success: false }; }
+  await reportCommandCompletion(completion, "gateway.music_profile_skip_completion_failed");
+  return true;
+}
+
+async function runMusicProfileShuffleOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_shuffle_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || !validMusicShuffleCommand(command)) throw new Error("gateway.music_profile_shuffle_claim_invalid");
+  let completion;
+  try { completion = { commandId: command.commandId, mode: "music_profile_shuffle_complete", snapshot: await withinDeadline(musicAssistant.setShuffle(command), 12_000, "music_assistant.shuffle_timeout"), success: true }; }
+  catch (error) { const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error"; completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_shuffle_complete", success: false }; }
+  await reportCommandCompletion(completion, "gateway.music_profile_shuffle_completion_failed");
   return true;
 }
 
@@ -576,7 +621,10 @@ const musicProfileTransferCommandDrain = new BoundedQueueDrain({
   onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"),
   onLimit: () => console.error("Der Music-Assistant-Gateway hat die Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
 });
+const musicProfileAllRoomsCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileAllRoomsOnce, onClaimed: (count) => console.info(`gateway.music_profile_all_rooms_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Alle-Räume-Auftragsgrenze erreicht.") });
 const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSeekOnce, onClaimed: (count) => console.info(`gateway.music_profile_seek_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Seek-Auftragsgrenze erreicht.") });
+const musicProfileSkipCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSkipOnce, onClaimed: (count) => console.info(`gateway.music_profile_skip_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Skip-Auftragsgrenze erreicht.") });
+const musicProfileShuffleCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileShuffleOnce, onClaimed: (count) => console.info(`gateway.music_profile_shuffle_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Shuffle-Auftragsgrenze erreicht.") });
 const musicCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicCatalogOnce, onClaimed: (count) => console.info(`gateway.music_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Suchauftragsgrenze erreicht.") });
 const musicAlbumCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicAlbumCatalogOnce, onClaimed: (count) => console.info(`gateway.music_album_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Album-Suchauftragsgrenze erreicht.") });
 const musicStartCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicStartOnce, onClaimed: (count) => console.info(`gateway.music_profile_start_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Startauftragsgrenze erreicht.") });
@@ -605,7 +653,7 @@ async function drainDeviceCommands() {
       nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
     }
     if (Date.now() >= nextMusicInventoryAt) {
-      await reportMusicAssistantDiscovery();
+      await musicDiscoveryReporter.request();
       nextMusicInventoryAt = Date.now() + 60_000;
     }
   } catch (error) {
@@ -622,7 +670,10 @@ function drainCommands() {
   void musicCommandDrain.request();
   void musicVolumeCommandDrain.request();
   void musicProfileTransferCommandDrain.request();
+  void musicProfileAllRoomsCommandDrain.request();
   void musicProfileSeekCommandDrain.request();
+  void musicProfileSkipCommandDrain.request();
+  void musicProfileShuffleCommandDrain.request();
   void musicCatalogCommandDrain.request();
   void musicAlbumCatalogCommandDrain.request();
   void musicStartCommandDrain.request();
