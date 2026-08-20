@@ -431,7 +431,7 @@ async function runMusicVolumeOnce() {
     completion = {
       commandId: command.commandId,
       mode: "music_volume_complete",
-      observedVolume: await withinDeadline(musicAssistant.setVolume(command), 7_000, "music_assistant.command_timeout"),
+      observedVolumes: await withinDeadline(musicAssistant.setVolumes(command), 14_000, "music_assistant.command_timeout"),
       success: true
     };
   } catch (error) {
