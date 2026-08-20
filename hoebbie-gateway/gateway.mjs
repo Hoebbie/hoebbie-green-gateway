@@ -561,6 +561,25 @@ async function runMusicCatalogOnce() {
   return true;
 }
 
+async function runMusicAlbumCatalogOnce() {
+  if (!musicAssistant) return false;
+  const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_album_catalog_claim" }) });
+  if (claimed.status === 204) return false;
+  const command = await claimed.json().catch(() => null);
+  if (!claimed.ok || typeof command?.commandId !== "string" || typeof command?.query !== "string" || command.query.trim().length < 3 || command.query.trim().length > 100) throw new Error("gateway.music_album_catalog_claim_invalid");
+  let completion;
+  try {
+    const items = await withinDeadline(musicAssistant.searchAlbums(command.query), 8_000, "music_assistant.search_timeout");
+    completion = { commandId: command.commandId, items, mode: "music_catalog_complete", success: true };
+  } catch (error) {
+    const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
+    completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_catalog_complete", success: false };
+  }
+  await reportCommandCompletion(completion, "gateway.music_album_catalog_completion_failed");
+  console.info(`gateway.music_album_catalog_completed:${completion.success ? "success" : "failed"}`);
+  return true;
+}
+
 async function runMusicStartOnce() {
   if (!musicAssistant) return false;
   const claimed = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_start_claim" }) });
@@ -607,6 +626,7 @@ const musicProfileSeekCommandDrain = new BoundedQueueDrain({ claimOnce: runMusic
 const musicProfileSkipCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileSkipOnce, onClaimed: (count) => console.info(`gateway.music_profile_skip_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Skip-Auftragsgrenze erreicht.") });
 const musicProfileShuffleCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicProfileShuffleOnce, onClaimed: (count) => console.info(`gateway.music_profile_shuffle_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Shuffle-Auftragsgrenze erreicht.") });
 const musicCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicCatalogOnce, onClaimed: (count) => console.info(`gateway.music_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Suchauftragsgrenze erreicht.") });
+const musicAlbumCatalogCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicAlbumCatalogOnce, onClaimed: (count) => console.info(`gateway.music_album_catalog_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Album-Suchauftragsgrenze erreicht.") });
 const musicStartCommandDrain = new BoundedQueueDrain({ claimOnce: runMusicStartOnce, onClaimed: (count) => console.info(`gateway.music_profile_start_claimed:${count}`), onError: (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Gateway-Fehler"), onLimit: () => console.error("Der Music-Assistant-Gateway hat die Startauftragsgrenze erreicht.") });
 const musicGroupCommandDrain = new BoundedQueueDrain({
   claimOnce: runMusicGroupOnce,
@@ -655,6 +675,7 @@ function drainCommands() {
   void musicProfileSkipCommandDrain.request();
   void musicProfileShuffleCommandDrain.request();
   void musicCatalogCommandDrain.request();
+  void musicAlbumCatalogCommandDrain.request();
   void musicStartCommandDrain.request();
   void musicGroupCommandDrain.request();
   void drainDeviceCommands();
