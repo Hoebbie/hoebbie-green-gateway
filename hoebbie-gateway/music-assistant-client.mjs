@@ -81,7 +81,7 @@ export function validMusicStartCommand(command) {
     && command.mediaUri.length >= 4
     && command.mediaUri.length <= 500
     && /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$/i.test(command.mediaUri)
-    && (command.mediaKind === "track" || command.mediaKind === "playlist"));
+    && (command.mediaKind === "album" || command.mediaKind === "track" || command.mediaKind === "playlist"));
 }
 
 /** The contract probe accepts only documented Music Assistant state events.
@@ -124,8 +124,9 @@ function selectedMediaItem(value, kind) {
   const name = mediaLabel(value.name);
   const uri = mediaLabel(value.uri, 500);
   if (!name || !uri || !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
-  const artist = kind === "track" ? mediaLabel(value.artists?.[0]?.name ?? value.artist?.name ?? value.artist) : null;
-  return { artist, kind, name, uri };
+  const artist = kind === "album" || kind === "track" ? mediaLabel(value.artists?.[0]?.name ?? value.artist?.name ?? value.artist) : null;
+  const releaseYear = kind === "album" && Number.isInteger(value.year) && value.year >= 1800 && value.year <= 2200 ? value.year : undefined;
+  return { artist, kind, name, ...(releaseYear === undefined ? {} : { releaseYear }), uri };
 }
 
 function belongsToProvider(value, providerInstanceId) {
@@ -257,6 +258,19 @@ export class MusicAssistantClient {
     const rows = response.payload?.tracks ?? response.payload?.result?.tracks;
     if (!response.ok || !Array.isArray(rows)) throw new MusicAssistantGatewayError("music_assistant.search_unavailable", "Music Assistant konnte keine Titel suchen.");
     return rows.filter((item) => belongsToProvider(item, provider)).slice(0, 20).map((item) => selectedMediaItem(item, "track")).filter(Boolean);
+  }
+
+  /** Reads a bounded album catalog only. The exact fixed Music Assistant
+   * command cannot alter playback; incomplete results fail closed. */
+  async searchAlbums(query) {
+    const searchQuery = mediaLabel(query, 100);
+    if (!searchQuery || searchQuery.length < 3) throw new MusicAssistantGatewayError("music_assistant.search_invalid", "Die Albumsuche ist ungültig.");
+    const response = await this.command("music/search", { limit: 20, media_types: ["album"], search_query: searchQuery });
+    const rows = Array.isArray(response.payload) ? response.payload : response.payload?.albums ?? response.payload?.result?.albums;
+    if (!response.ok || !Array.isArray(rows) || rows.length > 20) throw new MusicAssistantGatewayError("music_assistant.catalog_unavailable", "Music Assistant konnte keine gültigen Albumtreffer bestätigen.");
+    const albums = rows.map((item) => selectedMediaItem(item, "album"));
+    if (albums.some((item) => item === null)) throw new MusicAssistantGatewayError("music_assistant.invalid_response", "Music Assistant hat unvollständige Albumtreffer geliefert.");
+    return albums;
   }
 
   /** Reads the configured Music-Assistant playlist library without changing a queue. */

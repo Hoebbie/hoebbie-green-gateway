@@ -53,6 +53,21 @@ test("uses fixed bounded commands for title search and playlist browsing", async
   assert.equal(calls[1].args.provider, "spotify--lars");
 });
 
+test("uses a fixed read-only Music Assistant command for album catalog search", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    return new Response(JSON.stringify({ result: { albums: [{ artists: [{ name: "Eminem" }], name: "The Death of Slim Shady", uri: "spotify://album/example", year: 2024 }] } }), { status: 200 });
+  });
+  assert.deepEqual(await client.searchAlbums(" Eminem "), [{ artist: "Eminem", kind: "album", name: "The Death of Slim Shady", releaseYear: 2024, uri: "spotify://album/example" }]);
+  assert.deepEqual(calls, [{ args: { limit: 20, media_types: ["album"], search_query: "Eminem" }, command: "music/search", message_id: "1" }]);
+});
+
+test("rejects incomplete album catalog data rather than inventing a result", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify({ result: { albums: [{ name: "Unbekannt" }] } }), { status: 200 }));
+  await assert.rejects(client.searchAlbums("Eminem"), { code: "music_assistant.invalid_response" });
+});
+
 test("starts only a validated server-authorized media URI and verifies the target", async () => {
   const calls = [];
   const client = new MusicAssistantClient(config, async (_url, options) => {
@@ -65,6 +80,10 @@ test("starts only a validated server-authorized media URI and verifies the targe
   assert.equal(validMusicStartCommand(command), true);
   assert.equal((await client.startPlayback(command)).sourcePlayerId, "sonos:living");
   assert.deepEqual(calls.find((call) => call.command === "player_queues/play_media")?.args, { media: "spotify://playlist/456", option: "replace", queue_id: "sonos:living", radio_mode: false });
+});
+
+test("permits an album only after server-side selection validation", () => {
+  assert.equal(validMusicStartCommand({ commandId: "album-1", mediaKind: "album", mediaUri: "spotify://album/example", targetPlayerId: "sonos:living" }), true);
 });
 
 test("rejects malformed start media before Music Assistant is called", async () => {
