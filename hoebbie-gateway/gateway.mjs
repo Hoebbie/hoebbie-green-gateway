@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
-import { safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
+import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
 
@@ -198,19 +198,10 @@ async function request(url, options) {
 }
 
 async function reportCommandCompletion(completion, failureCode) {
-  let lastFailure = failureCode;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const reported = await withinDeadline(request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) }), 4_000, failureCode);
-      if (reported.ok) return;
-      lastFailure = await safeGatewayResponseFailure(reported, failureCode);
-    } catch (error) {
-      // A lost response is safe to retry because completion RPCs are
-      // idempotent for the same final state.
-      lastFailure = safeGatewayError(error, failureCode);
-    }
-  }
-  throw new Error(lastFailure);
+  await reportGatewayCompletion({
+    failureCode,
+    post: () => request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) })
+  });
 }
 
 async function resolvePilotEntityId() {
@@ -353,8 +344,7 @@ async function executeEntityCommand(command) {
 }
 
 async function reportEntityCompletion(completion) {
-  const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
-  if (!reported.ok) throw new Error("gateway.entity_completion_failed");
+  await reportCommandCompletion(completion, "gateway.entity_completion_failed");
 }
 
 async function refreshAfterEntitySuccess(successful) {
