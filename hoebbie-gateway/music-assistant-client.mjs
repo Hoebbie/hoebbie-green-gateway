@@ -111,7 +111,7 @@ export function validMusicStartCommand(command) {
     && command.mediaUri.length >= 4
     && command.mediaUri.length <= 500
     && /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+$/i.test(command.mediaUri)
-    && (command.mediaKind === "album" || command.mediaKind === "track" || command.mediaKind === "playlist"));
+    && (command.mediaKind === "album" || command.mediaKind === "track" || command.mediaKind === "playlist" || command.mediaKind === "radio"));
 }
 
 /** The contract probe accepts only documented Music Assistant state events.
@@ -251,6 +251,7 @@ export function validMusicAssistantConfig(config) {
  */
 export class MusicAssistantClient {
   #sequence = 0;
+  #radioContractCapabilities = null;
   // A profile session is allowed to retain only its already confirmed queue.
   // This lets a PAUSED event update that same session without guessing between
   // unrelated paused queues elsewhere in the household.
@@ -505,6 +506,10 @@ export class MusicAssistantClient {
    * in logs, snapshots or mobile responses. */
   async startPlayback(command) {
     if (!validMusicStartCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_start", "Der freigegebene Musikstart ist ungültig.");
+    if (command.mediaKind === "radio") {
+      const contract = this.#radioContractCapabilities ?? await this.radioContract();
+      if (!contract.directUriPlayback) throw new MusicAssistantGatewayError("music_assistant.radio_contract_unsupported", "Die installierte Music-Assistant-Version bestätigt den Radio-Pfad nicht.");
+    }
     const target = await this.getPlayer(command.targetPlayerId);
     if (!target.available) throw new MusicAssistantGatewayError("music_assistant.start_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
     const before = await this.queueSnapshot(command.targetPlayerId);
@@ -518,7 +523,8 @@ export class MusicAssistantClient {
         || snapshot?.artist !== before.artist
         || (snapshot?.progressSeconds !== null && snapshot?.progressSeconds !== undefined && snapshot.progressSeconds <= 5)
         || (snapshot?.progressSeconds !== null && snapshot?.progressSeconds !== undefined && before.progressSeconds !== null && snapshot.progressSeconds < before.progressSeconds);
-      if (snapshot?.sourcePlayerId === command.targetPlayerId && snapshot.isPlaying && observedTarget.available && observedTarget.isPlaying && snapshot.title && playbackChanged) {
+      const hasUsableMetadata = Boolean(snapshot?.title) || command.mediaKind === "radio";
+      if (snapshot?.sourcePlayerId === command.targetPlayerId && snapshot.isPlaying && observedTarget.available && observedTarget.isPlaying && hasUsableMetadata && playbackChanged) {
         this.#profileQueueId = command.targetPlayerId;
         return snapshot;
       }
@@ -634,6 +640,41 @@ export class MusicAssistantClient {
       shuffle: document.includes("player_queues/shuffle"),
       ungroup: document.includes("players/cmd/ungroup")
     };
+  }
+
+  /** Reads the generated command contract introduced by Music Assistant 2.9.
+   * No media, player or library payload is requested or logged. */
+  async radioContract() {
+    let response;
+    try {
+      response = await this.fetcher(`${this.config.baseUrl}/api-docs/commands.json`, {
+        headers: { Authorization: `Bearer ${this.config.accessToken}` },
+        method: "GET",
+        signal: AbortSignal.timeout(5_000)
+      });
+    } catch {
+      throw new MusicAssistantGatewayError("music_assistant.radio_contract_unavailable", "Der lokale Music-Assistant-Radiovertrag ist nicht erreichbar.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new MusicAssistantGatewayError("music_assistant.authentication_failed", "Der Music-Assistant-Zugang wurde abgelehnt.");
+    }
+    if (!response.ok) {
+      throw new MusicAssistantGatewayError(`music_assistant.radio_contract_http_${response.status}`, "Der lokale Music-Assistant-Radiovertrag ist nicht erreichbar.");
+    }
+    const commands = await response.json().catch(() => null);
+    if (!Array.isArray(commands) || commands.length > 2_000) {
+      throw new MusicAssistantGatewayError("music_assistant.radio_contract_invalid", "Der lokale Music-Assistant-Radiovertrag ist ungültig.");
+    }
+    const playMedia = commands.find((entry) => entry && typeof entry === "object" && entry.command === "player_queues/play_media");
+    const parameterNames = Array.isArray(playMedia?.parameters)
+      ? new Set(playMedia.parameters.flatMap((parameter) => parameter && typeof parameter.name === "string" ? [parameter.name] : []))
+      : new Set();
+    const capabilities = {
+      directUriPlayback: Boolean(playMedia && parameterNames.has("queue_id") && parameterNames.has("media") && parameterNames.has("option") && parameterNames.has("radio_mode")),
+      radioLibraryReadable: commands.some((entry) => entry && typeof entry === "object" && entry.command === "music/radios/library_items")
+    };
+    this.#radioContractCapabilities = capabilities;
+    return capabilities;
   }
 
   async command(command, args) {
