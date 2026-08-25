@@ -40,7 +40,8 @@ test("uses only the fixed player discovery command", async () => {
 
 test("uses fixed bounded commands for title search and playlist browsing", async () => {
   const calls = [];
-  const client = new MusicAssistantClient(config, async (_url, options) => {
+  const client = new MusicAssistantClient(config, async (url, options) => {
+    if (url.endsWith("/api-docs/commands.json")) return radioContractResponse();
     const request = JSON.parse(options.body); calls.push(request);
     return new Response(JSON.stringify(request.command === "music/search"
       ? { tracks: [{ artists: [{ name: "Künstler" }], name: "Titel", provider_mappings: [{ provider_instance: "spotify--lars" }], uri: "spotify://track/123" }] }
@@ -84,6 +85,67 @@ test("starts only a validated server-authorized media URI and verifies the targe
 
 test("permits an album only after server-side selection validation", () => {
   assert.equal(validMusicStartCommand({ commandId: "album-1", mediaKind: "album", mediaUri: "spotify://album/example", targetPlayerId: "sonos:living" }), true);
+});
+
+test("permits a server-authorized radio URL and keeps MA dynamic radio mode disabled", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (url, options) => {
+    if (url.endsWith("/api-docs/commands.json")) return radioContractResponse();
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "players/get") return new Response(JSON.stringify({ available: true, name: "Küche", player_id: "sonos:kitchen", powered: true, state: "playing" }), { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: { duration: null, name: "Radio Hamburg" }, elapsed_time: 0, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+    return new Response(JSON.stringify(null), { status: 200 });
+  });
+  const command = { commandId: "radio-1", mediaKind: "radio", mediaUri: "https://stream.radiohamburg.de/live/mp3-192/linkradiohamburg/", targetPlayerId: "sonos:kitchen" };
+  assert.equal(validMusicStartCommand(command), true);
+  assert.equal((await client.startPlayback(command)).title, "Radio Hamburg");
+  assert.deepEqual(calls.find((call) => call.command === "player_queues/play_media")?.args, { media: command.mediaUri, option: "replace", queue_id: "sonos:kitchen", radio_mode: false });
+});
+
+test("does not block confirmed radio playback when the stream omits track metadata", async () => {
+  const client = new MusicAssistantClient(config, async (url, options) => {
+    if (url.endsWith("/api-docs/commands.json")) return radioContractResponse();
+    const request = JSON.parse(options.body);
+    if (request.command === "players/get") return new Response(JSON.stringify({ available: true, name: "Küche", player_id: "sonos:kitchen", powered: true, state: "playing" }), { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_item: null, elapsed_time: 0, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+    return new Response(JSON.stringify(null), { status: 200 });
+  });
+  await expectRadioStart(client);
+});
+
+test("fails closed before a player command when the installed contract omits direct URI playback", async () => {
+  let apiRequests = 0;
+  const client = new MusicAssistantClient(config, async (url) => {
+    if (url.endsWith("/api-docs/commands.json")) return new Response(JSON.stringify([{ command: "music/radios/library_items", parameters: [] }]), { status: 200 });
+    apiRequests += 1;
+    return new Response(JSON.stringify(null), { status: 200 });
+  });
+  await assert.rejects(client.startPlayback({ commandId: "radio-unsupported", mediaKind: "radio", mediaUri: "https://example.test/live.mp3", targetPlayerId: "sonos:kitchen" }), { code: "music_assistant.radio_contract_unsupported" });
+  assert.equal(apiRequests, 0);
+});
+
+async function expectRadioStart(client) {
+  const snapshot = await client.startPlayback({ commandId: "radio-no-meta", mediaKind: "radio", mediaUri: "https://example.test/live.mp3", targetPlayerId: "sonos:kitchen" });
+  assert.equal(snapshot.isPlaying, true);
+  assert.equal(snapshot.title, null);
+}
+
+function radioContractResponse() {
+  return new Response(JSON.stringify([{ command: "music/radios/library_items", parameters: [] }, { command: "player_queues/play_media", parameters: [{ name: "queue_id" }, { name: "media" }, { name: "option" }, { name: "radio_mode" }] }]), { status: 200 });
+}
+
+test("verifies the generated Music Assistant 2.9 radio command contract read-only", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (url, options) => {
+    calls.push({ options, url });
+    return new Response(JSON.stringify([
+      { command: "music/radios/library_items", parameters: [] },
+      { command: "player_queues/play_media", parameters: [{ name: "queue_id" }, { name: "media" }, { name: "option" }, { name: "radio_mode" }] }
+    ]), { status: 200 });
+  });
+  assert.deepEqual(await client.radioContract(), { directUriPlayback: true, radioLibraryReadable: true });
+  assert.equal(calls[0].url, "http://music-assistant.local:8095/api-docs/commands.json");
+  assert.equal(calls[0].options.method, "GET");
 });
 
 test("rejects malformed start media before Music Assistant is called", async () => {
