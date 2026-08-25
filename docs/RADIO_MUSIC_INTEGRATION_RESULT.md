@@ -7,7 +7,13 @@ Der Gateway verwendet für Radio denselben serverautorisierten
 eine zuvor von Hoebbie OS freigegebene HTTPS-Stream-URL übergeben. Räume,
 Gruppen, Lautstärke und Queue-Snapshots bleiben unverändert gemeinsam.
 
-Für Music Assistant 2.9.13 wurde im offiziellen Tag `2.9.13` verifiziert:
+Die tatsächlich installierte Instanz ist unter
+`http://homeassistant.local:8095` lesend erreichbar. Ihr unauthentifizierter
+Handshake meldet Serverversion 2.9.13, Schemas 31/28. Der Abruf von
+`/api-docs/commands.json` liefert HTTP 200 und bestätigt im laufenden System
+für `player_queues/play_media` genau die Parameter `queue_id`, `media`,
+`option` und `radio_mode`; `media` akzeptiert ausdrücklich `Radio` und
+URI-Strings. Zusätzlich wurde im offiziellen Tag `2.9.13` verifiziert:
 
 - direkte URLs werden vom Builtin-Provider aufgelöst und endlose Streams als
   Radio behandelt;
