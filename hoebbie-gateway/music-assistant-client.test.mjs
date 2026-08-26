@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -111,6 +111,10 @@ test("does not block confirmed radio playback when the stream omits track metada
     return new Response(JSON.stringify(null), { status: 200 });
   });
   await expectRadioStart(client);
+});
+
+test("gives Music Assistant a bounded cold-radio probe budget", () => {
+  assert.equal(RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, 20_000);
 });
 
 test("fails closed before a player command when the installed contract omits direct URI playback", async () => {
@@ -295,6 +299,33 @@ test("restores only a valid profile queue after Green restarts and publishes its
   const paused = await client.activeQueueSnapshot();
   assert.equal(paused.sourcePlayerId, "sonos:kitchen");
   assert.equal(paused.isPlaying, false);
+});
+
+test("keeps the confirmed profile queue when another Sonos queue is also playing", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([
+    { current_item: { artists: [{ name: "Andere" }], duration: 200, name: "Kiss Me" }, elapsed_time: 20, queue_id: "sonos:living", state: "playing" },
+    { current_item: { artists: [{ name: "Familie" }], duration: 180, name: "Supermama" }, elapsed_time: 40, queue_id: "sonos:kitchen", state: "playing" }
+  ]), { status: 200 }));
+
+  assert.equal(client.restoreProfileQueue("sonos:kitchen"), true);
+  const snapshot = await client.activeQueueSnapshot();
+  assert.equal(snapshot.sourcePlayerId, "sonos:kitchen");
+  assert.equal(snapshot.title, "Supermama");
+  assert.equal(snapshot.artist, "Familie");
+});
+
+test("can reject a stale retained queue and try the next server-confirmed candidate", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([
+    { current_item: { duration: 200, name: "Kiss Me" }, elapsed_time: 20, queue_id: "sonos:living", state: "playing" },
+    { current_item: { duration: 180, name: "Supermama" }, elapsed_time: 40, queue_id: "sonos:kitchen", state: "playing" }
+  ]), { status: 200 }));
+
+  assert.equal(client.restoreProfileQueue("sonos:living"), true);
+  assert.equal((await client.activeQueueSnapshot()).sourcePlayerId, "sonos:living");
+  assert.equal(client.clearProfileQueue("sonos:living"), true);
+  const recovered = await client.activeQueueSnapshot(["sonos:living"]);
+  assert.equal(recovered.sourcePlayerId, "sonos:kitchen");
+  assert.equal(recovered.title, "Supermama");
 });
 
 test("transfers only a bounded queue and confirms its target", async () => {

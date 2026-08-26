@@ -46,6 +46,11 @@ function persistProfileQueueId(value) {
   chmodSync(profileQueuePath, 0o600);
 }
 
+function clearPersistedProfileQueueId() {
+  writeFileSync(profileQueuePath, "", { encoding: "utf8", mode: 0o600 });
+  chmodSync(profileQueuePath, 0o600);
+}
+
 function musicAssistantClientFromEnvironment() {
   const baseUrl = process.env.MUSIC_ASSISTANT_URL?.trim() ?? "";
   const accessToken = process.env.MUSIC_ASSISTANT_ACCESS_TOKEN?.trim() ?? "";
@@ -109,11 +114,21 @@ async function reportMusicAssistantDiscovery() {
     const reason = typeof failure?.reason === "string" && /^[A-Za-z0-9_]{1,30}$/.test(failure.reason) ? `:${failure.reason}` : "";
     throw new Error(`gateway.music_inventory_report_failed:${reported.status}${reason}`);
   }
-  const snapshot = await musicAssistant.activeQueueSnapshot();
-  if (snapshot) {
+  const rejectedPlayerIds = [];
+  for (let attempt = 0; attempt < Math.min(players.length, 8); attempt += 1) {
+    const snapshot = await musicAssistant.activeQueueSnapshot(rejectedPlayerIds);
+    if (!snapshot) break;
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, nextTracks: snapshot.nextTracks, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
-    persistProfileQueueId(snapshot.sourcePlayerId);
+    const confirmation = await sessionReported.json().catch(() => null);
+    if (!confirmation || !Number.isInteger(confirmation.updated) || confirmation.updated < 0) throw new Error("gateway.music_profile_snapshot_confirmation_invalid");
+    if (confirmation.updated > 0) {
+      persistProfileQueueId(snapshot.sourcePlayerId);
+      break;
+    }
+    rejectedPlayerIds.push(snapshot.sourcePlayerId);
+    musicAssistant.clearProfileQueue(snapshot.sourcePlayerId);
+    clearPersistedProfileQueueId();
   }
   const available = players.filter((player) => player.available).length;
   const playing = players.filter((player) => player.isPlaying).length;
@@ -581,7 +596,7 @@ async function runMusicStartOnce() {
   if (!claimed.ok || !validMusicStartCommand(command)) throw new Error("gateway.music_profile_start_claim_invalid");
   let completion;
   try {
-    completion = { commandId: command.commandId, mode: "music_profile_start_complete", snapshot: await withinDeadline(musicAssistant.startPlayback(command), 15_000, "music_assistant.start_timeout"), success: true };
+    completion = { commandId: command.commandId, mode: "music_profile_start_complete", snapshot: await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 30_000 : 15_000, "music_assistant.start_timeout"), success: true };
   } catch (error) {
     const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
     completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_start_complete", success: false };
