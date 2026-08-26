@@ -626,6 +626,10 @@ async function runMusicStartOnce() {
     completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_start_complete", success: false };
   }
   await reportCommandCompletion(completion, "gateway.music_profile_start_completion_failed");
+  // Publish a selected radio title as soon as the start confirmation exists.
+  // The report is deliberately detached: missing stream metadata must never
+  // delay or turn a confirmed playback command into a failure.
+  if (completion.success) void musicDiscoveryReporter.request();
   console.info(`gateway.music_profile_start_completed:${completion.success ? "success" : "failed"}`);
   return true;
 }

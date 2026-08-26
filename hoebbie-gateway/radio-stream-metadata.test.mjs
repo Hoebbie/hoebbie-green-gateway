@@ -46,6 +46,18 @@ test("reads a legacy ICY response after a strict HTTP reader rejects it", () => 
   assert.deepEqual(radioIcyResponseMetadata(response), { artist: "Artist", title: "Song" });
 });
 
+test("follows an HTTP redirect to a legacy ICY response", () => {
+  const interval = 8;
+  const body = icyBlock("Artist - Song");
+  const redirect = new TextEncoder().encode("HTTP/1.1 302 Found\r\nlocation: https://stream.example.test/live\r\n\r\n");
+  const header = new TextEncoder().encode(`ICY 200 OK\r\nicy-metaint: ${interval}\r\n\r\n`);
+  const response = new Uint8Array(redirect.length + header.length + body.length);
+  response.set(redirect);
+  response.set(header, redirect.length);
+  response.set(body, redirect.length + header.length);
+  assert.deepEqual(radioIcyResponseMetadata(response), { artist: "Artist", title: "Song" });
+});
+
 test("uses the compatibility reader when a valid HTTP response has no title", async () => {
   const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(9)); controller.close(); } });
   const fetcher = async () => new Response(stream, { headers: { "icy-metaint": "8" } });

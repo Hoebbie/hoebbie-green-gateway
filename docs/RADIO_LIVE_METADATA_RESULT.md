@@ -44,6 +44,10 @@ Standardleser technisch antwortet, im ersten begrenzten Abruf aber noch keinen
 Titel erhält. Das ist bei diesen Streams ein normaler leerer ICY-Block und kein
 Wiedergabefehler.
 
+Version 0.3.54 stößt den bestehenden, nicht-blockierenden Abgleich zusätzlich
+unmittelbar nach einem bestätigten Radiostart an. Der reguläre 30-Sekunden-
+Abgleich bleibt bestehen.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
