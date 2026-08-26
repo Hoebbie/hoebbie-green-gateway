@@ -6,7 +6,7 @@ LABEL \
   io.hass.arch="${BUILD_ARCH}" \
   io.hass.type="app" \
   io.hass.version="${BUILD_VERSION}"
-RUN apk add --no-cache nodejs
+RUN apk add --no-cache curl nodejs
 COPY gateway.mjs /app/gateway.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs

@@ -32,6 +32,13 @@ Wiedergabe niemals blockieren. Nicht-Radio-Titel (etwa Spotify) sind durch die
 fehlende feste Spieldauer des Radio-Queue-Items abgegrenzt und werden nicht
 überschrieben.
 
+Ein Teil der offiziellen Sender-CDNs verwendet weiterhin die ältere
+Statuszeile `ICY 200`, die der strikte Node-HTTP-Leser verwirft. Version 0.3.52
+liest diese Antwort deshalb über den im Add-on enthaltenen, ebenfalls auf sieben
+Sekunden und eine kleine Datenmenge begrenzten Kompatibilitätspfad. Das betrifft
+Radio Hamburg, 90s90s und TOGGO Radio; keine Sender-URL, Wiedergabe- oder
+Raumkonfiguration wird dadurch geändert.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
