@@ -41,6 +41,11 @@ function headerEnd(bytes, offset) {
   return null;
 }
 
+function startsIcyResponse(bytes, offset) {
+  const prefix = new TextDecoder("latin1").decode(bytes.slice(offset, Math.min(offset + 5, bytes.length)));
+  return prefix.startsWith("HTTP/") || prefix.startsWith("ICY ");
+}
+
 /** Parses the final bounded ICY response returned by curl for legacy streams. */
 export function radioIcyResponseMetadata(bytes) {
   if (!(bytes instanceof Uint8Array)) return null;
@@ -54,7 +59,7 @@ export function radioIcyResponseMetadata(bytes) {
     const match = /^icy-metaint:\s*(\d+)\s*$/im.exec(headers);
     if (match) interval = Number(match[1]);
     offset = end;
-    if (!bytes.slice(offset, Math.min(offset + 5, bytes.length)).every((value, index) => value === new TextEncoder().encode("HTTP/")[index])) break;
+    if (!startsIcyResponse(bytes, offset)) break;
   }
   return interval === null ? null : radioIcyMetadataFromStream(bytes.slice(offset), interval);
 }
