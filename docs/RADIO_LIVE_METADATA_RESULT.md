@@ -48,6 +48,10 @@ Version 0.3.54 stößt den bestehenden, nicht-blockierenden Abgleich zusätzlich
 unmittelbar nach einem bestätigten Radiostart an. Der reguläre 30-Sekunden-
 Abgleich bleibt bestehen.
 
+Version 0.3.55 behandelt die von Music Assistant für Live-Streams verwendete
+Dauer `0` genauso wie eine fehlende Dauer. Normale Spotify-Titel haben eine
+positive Dauer und bleiben damit ausgeschlossen.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
