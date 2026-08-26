@@ -52,6 +52,11 @@ Version 0.3.55 behandelt die von Music Assistant für Live-Streams verwendete
 Dauer `0` genauso wie eine fehlende Dauer. Normale Spotify-Titel haben eine
 positive Dauer und bleiben damit ausgeschlossen.
 
+Version 0.3.56 identifiziert die aktive Radiosession stattdessen über den beim
+Start bestätigten Sendernamen. Damit hängt der direkte Metadatenpfad nicht mehr
+von einer providerabhängigen Dauerangabe ab; ein Spotify-Titel kann diesen
+Sendernamen nicht erfüllen.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
