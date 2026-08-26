@@ -21,3 +21,17 @@ und der Spotify-Pfad wurden nicht verändert.
 - gezielter Adaptertest für `Künstler - Titel` ergänzt;
 - Fallbacktest für fehlende beziehungsweise einteilige Metadaten ergänzt;
 - Add-on-Version auf `0.3.49` erhöht.
+
+## Redigierte Laufzeitdiagnose
+
+Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
+Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
+Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
+enthält nur zwei aggregierte Zähler: vorhandene Stream-Titel und daraus
+erkennbare Künstler–Titel-Paare. Er enthält ausdrücklich keine Sendernamen,
+Titel, Künstler, Queue- oder Player-IDs, Tokens oder andere Zugangsdaten.
+
+Die Diagnose ändert keine Queue, Wiedergabe, Räume, Lautstärke oder
+Music-Assistant-Einstellung. Sie dient dazu, sauber zwischen fehlender
+Upstream-Metadatenlieferung und einer Adapter-/Projektionsabweichung zu
+unterscheiden.
