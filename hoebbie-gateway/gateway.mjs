@@ -137,6 +137,7 @@ async function reportMusicAssistantDiscovery() {
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     const confirmation = await sessionReported.json().catch(() => null);
     if (!confirmation || !Number.isInteger(confirmation.updated) || confirmation.updated < 0) throw new Error("gateway.music_profile_snapshot_confirmation_invalid");
+    if (streamMetadata) console.info(`music_assistant.radio_snapshot_update:updated=${confirmation.updated}`);
     if (confirmation.updated > 0) {
       persistProfileQueueId(snapshot.sourcePlayerId);
       break;
