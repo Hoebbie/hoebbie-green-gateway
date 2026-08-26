@@ -387,6 +387,28 @@ export class MusicAssistantClient {
     return true;
   }
 
+  /**
+   * Returns only aggregate, redacted live-metadata availability. This is a
+   * diagnostic for the documented PlayerQueue.stream_title contract: neither
+   * queue identifiers nor any station, artist or title values leave the
+   * client.
+   */
+  async radioMetadataAvailability() {
+    const result = await this.command("player_queues/all", {});
+    const queues = Array.isArray(result.payload)
+      ? result.payload
+      : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result)
+        ? result.payload.result
+        : null;
+    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
+    if (!queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_invalid", "Music Assistant hat eine ungültige Queue-Übersicht geliefert.");
+    const streamTitles = queues.map((queue) => queue && typeof queue === "object" ? mediaLabel(queue.stream_title) : null).filter((value) => value !== null);
+    return {
+      artistTitlePairCount: streamTitles.filter((value) => radioStreamMetadata(value)?.artist !== null).length,
+      streamTitleCount: streamTitles.length
+    };
+  }
+
   /** Returns only a normalized queue snapshot for a fixed player. It never
    * logs or exposes the full queue. */
   async queueSnapshot(playerIdToRead, includeQueueIndex = false) {

@@ -265,6 +265,15 @@ test("keeps incomplete radio metadata non-blocking", () => {
   assert.equal(radioStreamMetadata(null), null);
 });
 
+test("reports only redacted stream-title availability for radio diagnosis", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([
+    { queue_id: "sonos:kitchen", stream_title: "Seal - Kiss From A Rose" },
+    { queue_id: "sonos:living", stream_title: "90s90s DAB" },
+    { queue_id: "sonos:office" }
+  ]), { status: 200 }));
+  assert.deepEqual(await client.radioMetadataAvailability(), { artistTitlePairCount: 1, streamTitleCount: 2 });
+});
+
 test("omits stale or future queue clocks instead of fabricating realtime", () => {
   const observedAt = "2026-08-19T17:00:00.000Z";
   assert.equal(verifiedQueueSourceTime("2026-08-19T16:54:59.999Z", observedAt, true), null);

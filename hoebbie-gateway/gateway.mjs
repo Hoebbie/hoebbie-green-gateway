@@ -82,6 +82,10 @@ async function reportMusicAssistantGroupCapabilities() {
   const queueRegistryAvailable = await musicAssistant.queueRegistryAvailable();
   // No queue, title, media id or player identifier is logged or persisted.
   console.info(`music_assistant.queue_registry_readable=${queueRegistryAvailable}`);
+  const radioMetadata = await musicAssistant.radioMetadataAvailability();
+  // This temporary diagnosis contains only aggregate availability. It never
+  // logs a queue, station, artist, title, player identifier or credential.
+  console.info(`music_assistant.radio_metadata:stream_title_count=${radioMetadata.streamTitleCount},artist_title_pair_count=${radioMetadata.artistTitlePairCount}`);
   const radio = await musicAssistant.radioContract();
   // Only fixed capability booleans leave the local Music Assistant process.
   console.info(`music_assistant.radio_contract:direct_uri_playback=${radio.directUriPlayback},radio_library_readable=${radio.radioLibraryReadable}`);
