@@ -62,6 +62,10 @@ Diagnoseeintrag `music_assistant.radio_icy_fallback`. Er enthält nur die drei
 booleschen Werte für Session-Verfolgung, -Übereinstimmung und verfügbare
 Metadaten – nie Sender, Titel, Künstler, URLs, IDs oder Zugangsdaten.
 
+Version 0.3.58 ergänzt für einen tatsächlich verfügbaren Radio-Fallback den
+anonymen Speicherwert `music_assistant.radio_snapshot_update:updated=0|1`.
+Er zeigt nur, ob der nachgelagerte Profil-Snapshot übernommen wurde.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag
