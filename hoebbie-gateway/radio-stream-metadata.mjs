@@ -65,9 +65,7 @@ function curlIcyResponse(streamUri) {
   });
 }
 
-/** Reads one bounded ICY metadata block from a server-authorized HTTPS stream. */
-export async function radioStreamMetadata(streamUri, fetcher = fetch) {
-  if (typeof streamUri !== "string" || !/^https:\/\//i.test(streamUri)) return null;
+async function fetchRadioStreamMetadata(streamUri, fetcher) {
   try {
     const response = await fetcher(streamUri, { headers: { "Icy-MetaData": "1" }, redirect: "follow", signal: AbortSignal.timeout(7_000) });
     const interval = Number(response.headers.get("icy-metaint"));
@@ -76,10 +74,16 @@ export async function radioStreamMetadata(streamUri, fetcher = fetch) {
     const maximumProbeBytes = Math.min((interval + 1 + MAXIMUM_METADATA_BYTES) * METADATA_BLOCK_SCAN_LIMIT, 81_921);
     while (size < maximumProbeBytes) { const next = await reader.read(); if (next.done) break; chunks.push(next.value); size += next.value.length; if (size >= interval + 1) { const all = new Uint8Array(size); let offset = 0; for (const chunk of chunks) { all.set(chunk, offset); offset += chunk.length; } const metadata = radioIcyMetadataFromStream(all, interval); if (metadata) { await reader.cancel(); return metadata; } } }
     await reader.cancel(); return null;
-  } catch {
-    // Some official radio CDNs intentionally use the legacy `ICY 200` status
-    // line, which strict HTTP clients reject before exposing the body. curl is
-    // available in the add-on image solely for this bounded compatibility read.
-    return radioIcyResponseMetadata(await curlIcyResponse(streamUri));
-  }
+  } catch { return null; }
+}
+
+/** Reads one bounded ICY metadata block from a server-authorized HTTPS stream. */
+export async function radioStreamMetadata(streamUri, fetcher = fetch, curlReader = curlIcyResponse) {
+  if (typeof streamUri !== "string" || !/^https:\/\//i.test(streamUri)) return null;
+  const metadata = await fetchRadioStreamMetadata(streamUri, fetcher);
+  if (metadata) return metadata;
+  // Some official radio CDNs intentionally use the legacy `ICY 200` status
+  // line, or send an empty first block, that strict HTTP clients do not expose
+  // as useful metadata. curl is available solely for this bounded fallback.
+  return radioIcyResponseMetadata(await curlReader(streamUri));
 }

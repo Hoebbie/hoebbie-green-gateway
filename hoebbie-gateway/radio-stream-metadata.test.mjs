@@ -46,6 +46,15 @@ test("reads a legacy ICY response after a strict HTTP reader rejects it", () => 
   assert.deepEqual(radioIcyResponseMetadata(response), { artist: "Artist", title: "Song" });
 });
 
+test("uses the compatibility reader when a valid HTTP response has no title", async () => {
+  const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(9)); controller.close(); } });
+  const fetcher = async () => new Response(stream, { headers: { "icy-metaint": "8" } });
+  let compatibilityRead = false;
+  const curlReader = async () => { compatibilityRead = true; return new Uint8Array(); };
+  assert.equal(await radioStreamMetadata("https://example.test/radio", fetcher, curlReader), null);
+  assert.equal(compatibilityRead, true);
+});
+
 test("rejects incomplete or malformed ICY metadata", () => {
   assert.equal(radioIcyMetadata(new Uint8Array(9), 8), null);
   assert.equal(radioIcyMetadata(icyBlock("Artist - Song"), 0), null);
