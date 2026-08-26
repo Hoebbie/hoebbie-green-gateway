@@ -10,6 +10,7 @@ RUN apk add --no-cache nodejs
 COPY gateway.mjs /app/gateway.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs
+COPY radio-stream-metadata.mjs /app/radio-stream-metadata.mjs
 COPY queue-drain.mjs /app/queue-drain.mjs
 COPY realtime-protocol.mjs /app/realtime-protocol.mjs
 COPY routine-target.mjs /app/routine-target.mjs

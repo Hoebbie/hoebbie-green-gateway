@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { radioStreamMetadata } from "./radio-stream-metadata.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
@@ -60,6 +61,7 @@ function musicAssistantClientFromEnvironment() {
 }
 
 const musicAssistant = musicAssistantClientFromEnvironment();
+const activeRadioStreamUris = new Map();
 const musicProfileProviders = (() => {
   try {
     const value = JSON.parse(process.env.MUSIC_PROFILE_PROVIDERS_JSON ?? "{}");
@@ -122,7 +124,12 @@ async function reportMusicAssistantDiscovery() {
   for (let attempt = 0; attempt < Math.min(players.length, 8); attempt += 1) {
     const snapshot = await musicAssistant.activeQueueSnapshot(rejectedPlayerIds);
     if (!snapshot) break;
-    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: snapshot.album, artist: snapshot.artist, artworkRef: snapshot.artworkRef, durationSeconds: snapshot.durationSeconds, isPlaying: snapshot.isPlaying, nextTracks: snapshot.nextTracks, observedAt: snapshot.observedAt, progressSeconds: snapshot.progressSeconds, sourceTime: snapshot.sourceTime, title: snapshot.title }, sourcePlayerId: snapshot.sourcePlayerId }) });
+    // A Music Assistant radio item has no fixed duration.  This guard keeps a
+    // previous radio selection from ever replacing a Spotify track's metadata.
+    const activeRadioStreamUri = snapshot.durationSeconds === null ? activeRadioStreamUris.get(snapshot.sourcePlayerId) : null;
+    const streamMetadata = activeRadioStreamUri ? await radioStreamMetadata(activeRadioStreamUri) : null;
+    const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     const confirmation = await sessionReported.json().catch(() => null);
     if (!confirmation || !Number.isInteger(confirmation.updated) || confirmation.updated < 0) throw new Error("gateway.music_profile_snapshot_confirmation_invalid");
@@ -145,6 +152,14 @@ const musicDiscoveryReporter = new CoalescedAsyncTask({
   onError: (error) => console.error(safeGatewayError(error, "music_assistant.live_state_report_failed")),
   run: reportMusicAssistantDiscovery
 });
+
+// Music Assistant does not currently surface ICY titles for the configured
+// direct streams. Refresh only an actively selected radio source; this never
+// sends a playback command and remains bounded to one request per 30 seconds.
+const radioMetadataRefresh = setInterval(() => {
+  if (activeRadioStreamUris.size > 0) void musicDiscoveryReporter.request();
+}, 30_000);
+radioMetadataRefresh.unref?.();
 
 let lastMusicAssistantContractEventAt = null;
 const musicAssistantRealtime = musicAssistant
@@ -600,7 +615,12 @@ async function runMusicStartOnce() {
   if (!claimed.ok || !validMusicStartCommand(command)) throw new Error("gateway.music_profile_start_claim_invalid");
   let completion;
   try {
-    completion = { commandId: command.commandId, mode: "music_profile_start_complete", snapshot: await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 30_000 : 15_000, "music_assistant.start_timeout"), success: true };
+    const snapshot = await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 30_000 : 15_000, "music_assistant.start_timeout");
+    if (command.mediaKind === "radio") {
+      activeRadioStreamUris.set(command.targetPlayerId, command.mediaUri);
+      if (typeof snapshot.sourcePlayerId === "string") activeRadioStreamUris.set(snapshot.sourcePlayerId, command.mediaUri);
+    } else activeRadioStreamUris.delete(command.targetPlayerId);
+    completion = { commandId: command.commandId, mode: "music_profile_start_complete", snapshot, success: true };
   } catch (error) {
     const code = error && typeof error === "object" && typeof error.code === "string" ? error.code : "music_assistant.unexpected_error";
     completion = { commandId: command.commandId, errorCode: code.slice(0, 100), mode: "music_profile_start_complete", success: false };
