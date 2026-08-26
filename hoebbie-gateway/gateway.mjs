@@ -124,9 +124,10 @@ async function reportMusicAssistantDiscovery() {
   for (let attempt = 0; attempt < Math.min(players.length, 8); attempt += 1) {
     const snapshot = await musicAssistant.activeQueueSnapshot(rejectedPlayerIds);
     if (!snapshot) break;
-    // A Music Assistant radio item has no fixed duration.  This guard keeps a
-    // previous radio selection from ever replacing a Spotify track's metadata.
-    const activeRadioStreamUri = snapshot.durationSeconds === null ? activeRadioStreamUris.get(snapshot.sourcePlayerId) : null;
+    // Music Assistant represents a live stream as either null or zero duration.
+    // Spotify titles have a positive duration, so this keeps a previous radio
+    // selection from ever replacing Spotify metadata.
+    const activeRadioStreamUri = (snapshot.durationSeconds === null || snapshot.durationSeconds === 0) ? activeRadioStreamUris.get(snapshot.sourcePlayerId) : null;
     const streamMetadata = activeRadioStreamUri ? await radioStreamMetadata(activeRadioStreamUri) : null;
     const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId }) });
