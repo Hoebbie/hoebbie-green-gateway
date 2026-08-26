@@ -5,6 +5,8 @@ export class MusicAssistantGatewayError extends Error {
   }
 }
 
+export const RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS = 20_000;
+
 function normalizedUrl(value) {
   let parsed;
   try {
@@ -271,6 +273,12 @@ export class MusicAssistantClient {
     return true;
   }
 
+  clearProfileQueue(value) {
+    if (this.#profileQueueId !== playerId(value)) return false;
+    this.#profileQueueId = null;
+    return true;
+  }
+
   async listPlayers() {
     let response;
     try {
@@ -410,16 +418,24 @@ export class MusicAssistantClient {
     return items.slice(0, 5).map(queuePresentationItem).filter((item) => item !== null);
   }
 
-  async activeQueueSnapshot() {
+  async activeQueueSnapshot(excludedPlayerIds = []) {
     const result = await this.command("player_queues/all", {});
     const queues = Array.isArray(result.payload) ? result.payload : result.payload && typeof result.payload === "object" && Array.isArray(result.payload.result) ? result.payload.result : null;
     if (!result.ok || !queues) throw new MusicAssistantGatewayError("music_assistant.queue_registry_unavailable", "Music Assistant konnte die Queue-Übersicht nicht lesen.");
-    const playing = queues.find((item) => item && typeof item === "object" && String(item.state).toUpperCase() === "PLAYING");
-    const playingId = playing && typeof playing === "object" ? playerId(playing.queue_id) : null;
-    const retainedInactive = this.#profileQueueId && queues.some((item) => item && typeof item === "object" && playerId(item.queue_id) === this.#profileQueueId && ["PAUSED", "IDLE"].includes(String(item.state).toUpperCase()))
+    const excluded = new Set(Array.isArray(excludedPlayerIds) ? excludedPlayerIds.map(playerId).filter(Boolean) : []);
+    // A household may legitimately have several independent Sonos queues.
+    // Once Hoebbie has confirmed its profile queue, keep reading that exact
+    // queue even when another room is also playing. Picking the first playing
+    // queue would publish no update for the retained profile source and leave
+    // stale metadata visible while controls act on newer Sonos state.
+    const retainedProfileQueue = this.#profileQueueId && !excluded.has(this.#profileQueueId) && queues.some((item) => item && typeof item === "object" && playerId(item.queue_id) === this.#profileQueueId)
       ? this.#profileQueueId
       : null;
-    const activeId = playingId ?? retainedInactive;
+    const playing = queues.find((item) => item && typeof item === "object" && !excluded.has(playerId(item.queue_id)) && String(item.state).toUpperCase() === "PLAYING");
+    const playingId = playing && typeof playing === "object" ? playerId(playing.queue_id) : null;
+    const inactive = queues.find((item) => item && typeof item === "object" && !excluded.has(playerId(item.queue_id)) && ["PAUSED", "IDLE"].includes(String(item.state).toUpperCase()));
+    const inactiveId = inactive && typeof inactive === "object" ? playerId(inactive.queue_id) : null;
+    const activeId = retainedProfileQueue ?? playingId ?? inactiveId;
     if (!activeId) return null;
     const snapshot = await this.queueSnapshot(activeId);
     if (snapshot) this.#profileQueueId = snapshot.sourcePlayerId;
@@ -513,7 +529,10 @@ export class MusicAssistantClient {
     const target = await this.getPlayer(command.targetPlayerId);
     if (!target.available) throw new MusicAssistantGatewayError("music_assistant.start_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
     const before = await this.queueSnapshot(command.targetPlayerId);
-    const result = await this.command("player_queues/play_media", { media: command.mediaUri, option: "replace", queue_id: command.targetPlayerId, radio_mode: false });
+    // Music Assistant resolves a plain URL through its builtin provider before
+    // queueing it. Radio probing can legitimately take longer than the normal
+    // five-second JSON-RPC budget, especially after redirects or a cold cache.
+    const result = await this.command("player_queues/play_media", { media: command.mediaUri, option: "replace", queue_id: command.targetPlayerId, radio_mode: false }, command.mediaKind === "radio" ? RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS : 5_000);
     if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.start_failed", "Music Assistant hat den Musikstart nicht ausgeführt.");
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const snapshot = await this.queueSnapshot(command.targetPlayerId);
@@ -677,14 +696,14 @@ export class MusicAssistantClient {
     return capabilities;
   }
 
-  async command(command, args) {
+  async command(command, args, timeoutMilliseconds = 5_000) {
     let response;
     try {
       response = await this.fetcher(`${this.config.baseUrl}/api`, {
         body: JSON.stringify({ args, command, message_id: String(++this.#sequence) }),
         headers: { Authorization: `Bearer ${this.config.accessToken}`, "Content-Type": "application/json" },
         method: "POST",
-        signal: AbortSignal.timeout(5_000)
+        signal: AbortSignal.timeout(timeoutMilliseconds)
       });
     } catch {
       throw new MusicAssistantGatewayError("music_assistant.connection_failed", "Music Assistant ist über die konfigurierte lokale Adresse nicht erreichbar.");
