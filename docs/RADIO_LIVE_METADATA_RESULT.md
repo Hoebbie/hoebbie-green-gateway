@@ -57,6 +57,11 @@ Start bestätigten Sendernamen. Damit hängt der direkte Metadatenpfad nicht meh
 von einer providerabhängigen Dauerangabe ab; ein Spotify-Titel kann diesen
 Sendernamen nicht erfüllen.
 
+Version 0.3.57 ergänzt vorübergehend einen ausschließlich aggregierten
+Diagnoseeintrag `music_assistant.radio_icy_fallback`. Er enthält nur die drei
+booleschen Werte für Session-Verfolgung, -Übereinstimmung und verfügbare
+Metadaten – nie Sender, Titel, Künstler, URLs, IDs oder Zugangsdaten.
+
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
 Music-Assistant-Queue überhaupt `stream_title`-Werte liefert. Der Logeintrag

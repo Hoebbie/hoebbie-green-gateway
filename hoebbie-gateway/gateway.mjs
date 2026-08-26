@@ -129,6 +129,9 @@ async function reportMusicAssistantDiscovery() {
     // A Spotify title cannot match that confirmed station title.
     const activeRadioStream = activeRadioStreams.get(snapshot.sourcePlayerId);
     const streamMetadata = activeRadioStream?.stationTitle === snapshot.title ? await radioStreamMetadata(activeRadioStream.streamUri) : null;
+    // Temporary redacted trace: it contains no sender, title, artist, player
+    // identifier, URL or credential, only the three decision outcomes.
+    console.info(`music_assistant.radio_icy_fallback:tracked=${activeRadioStream !== undefined},session_match=${activeRadioStream?.stationTitle === snapshot.title},metadata_available=${streamMetadata !== null}`);
     const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId }) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
