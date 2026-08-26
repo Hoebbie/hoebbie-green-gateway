@@ -4,7 +4,7 @@ Stand: 26. August 2026
 
 ## Ergebnis
 
-Der Green-Adapter liest Radio-Titel jetzt aus dem von Music Assistant 2.9.13
+Der Green-Adapter liest Radio-Titel bevorzugt aus dem von Music Assistant 2.9.13
 vorgesehenen Feld `PlayerQueue.stream_title`. Bislang wurde nur
 `PlayerQueue.current_item.name` ausgewertet; das ist bei einem linearen Stream
 in der Regel der Sendername und nicht der aktuell laufende Titel.
@@ -23,6 +23,14 @@ und der Spotify-Pfad wurden nicht verändert.
 - Add-on-Version auf `0.3.49` erhöht.
 
 ## Redigierte Laufzeitdiagnose
+
+Falls Music Assistant für einen laufenden, serverautorisierten Direktstream
+kein `stream_title` liefert, liest der Green-Adapter ergänzend genau einen
+begrenzt großen ICY-Metadatenblock direkt von diesem HTTPS-Stream. Die Abfrage
+läuft höchstens alle 30 Sekunden, löst keinen Player-Befehl aus und darf die
+Wiedergabe niemals blockieren. Nicht-Radio-Titel (etwa Spotify) sind durch die
+fehlende feste Spieldauer des Radio-Queue-Items abgegrenzt und werden nicht
+überschrieben.
 
 Falls die App trotz laufender Radio-Wiedergabe keine Live-Titel zeigt, kann
 Green nun zusätzlich ausschließlich lesend feststellen, ob die aktuelle
