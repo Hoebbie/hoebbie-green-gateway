@@ -219,6 +219,19 @@ export function verifiedQueueSourceTime(value, observedAt, isPlaying) {
   return new Date(sourceMilliseconds).toISOString();
 }
 
+/** Music Assistant 2.9 publishes current live-radio metadata on
+ * PlayerQueue.stream_title. Most ICY stations use `artist - title`; a station
+ * that supplies only one label still remains useful as a non-blocking title. */
+export function radioStreamMetadata(value) {
+  const streamTitle = mediaLabel(value);
+  if (!streamTitle) return null;
+  const separator = streamTitle.indexOf(" - ");
+  if (separator <= 0 || separator >= streamTitle.length - 3) return { artist: null, title: streamTitle };
+  const artist = mediaLabel(streamTitle.slice(0, separator));
+  const title = mediaLabel(streamTitle.slice(separator + 3));
+  return title ? { artist, title } : { artist: null, title: streamTitle };
+}
+
 function playerFromResponse(value) {
   if (!value || typeof value !== "object") return null;
   const id = playerId(value.player_id);
@@ -400,7 +413,8 @@ export class MusicAssistantClient {
     const observedAt = new Date().toISOString();
     const currentIndex = Number.isInteger(queue.current_index) && queue.current_index >= 0 ? queue.current_index : null;
     const nextTracks = currentIndex === null ? [] : await this.nextQueueItems(sourcePlayerId, currentIndex);
-    const snapshot = { album: text(current.album?.name ?? current.album), artist: text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, nextTracks, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: text(current.name ?? current.title) };
+    const liveMetadata = radioStreamMetadata(queue.stream_title);
+    const snapshot = { album: liveMetadata ? null : text(current.album?.name ?? current.album), artist: liveMetadata?.artist ?? text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, nextTracks, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: liveMetadata?.title ?? text(current.name ?? current.title) };
     return includeQueueIndex ? { ...snapshot, queueIndex: currentIndex } : snapshot;
   }
 

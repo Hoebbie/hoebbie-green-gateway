@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, radioStreamMetadata, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -250,6 +250,19 @@ test("normalizes only the active queue snapshot and keeps a public Spotify cover
   assert.deepEqual({ ...snapshot, observedAt: undefined, sourceTime: undefined }, { album: "Album", artist: "Künstler", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", durationSeconds: 240, isPlaying: true, nextTracks: [{ artist: "Danach", artworkRef: "https://i.scdn.co/image/ab67616d00001e02ff9ca10b55ce82ae553c8228", title: "Nächster Titel" }], observedAt: undefined, progressSeconds: 61, shuffleEnabled: null, sourcePlayerId: "sonos:kitchen", sourceTime: undefined, title: "Titel" });
   assert.match(snapshot.observedAt, /^\d{4}-\d\d-\d\dT/);
   assert.equal(snapshot.sourceTime, new Date(sourceSeconds * 1_000).toISOString());
+});
+
+test("uses Music Assistant's official PlayerQueue stream title for live radio metadata", async () => {
+  const client = new MusicAssistantClient(config, async () => new Response(JSON.stringify([{ current_item: { duration: null, name: "90s90s" }, elapsed_time: 0, queue_id: "sonos:kitchen", state: "playing", stream_title: "Seal - Kiss From A Rose" }]), { status: 200 }));
+  const snapshot = await client.queueSnapshot("sonos:kitchen");
+  assert.equal(snapshot.artist, "Seal");
+  assert.equal(snapshot.title, "Kiss From A Rose");
+  assert.equal(snapshot.album, null);
+});
+
+test("keeps incomplete radio metadata non-blocking", () => {
+  assert.deepEqual(radioStreamMetadata("90s90s Live"), { artist: null, title: "90s90s Live" });
+  assert.equal(radioStreamMetadata(null), null);
 });
 
 test("omits stale or future queue clocks instead of fabricating realtime", () => {
