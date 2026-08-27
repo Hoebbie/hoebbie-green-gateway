@@ -11,7 +11,7 @@ export function normalizeWasteSourceName(value) {
 }
 
 function allowedCollection(name) {
-  const normalized = normalizeWasteSourceName(name).replace(/^(sensor|awsh)/, "");
+  const normalized = normalizeWasteSourceName(name).replace(/^(?:sensor)?awsh/, "");
   return allowedCollections.find((collection) => collection.names.includes(normalized)) ?? null;
 }
 
@@ -27,7 +27,10 @@ export function wasteCollectionFromHomeAssistantState(state) {
   if (!state || typeof state !== "object" || typeof state.entity_id !== "string" || !/^sensor\.[a-z0-9_]+$/.test(state.entity_id)) return null;
   const attributes = state.attributes && typeof state.attributes === "object" ? state.attributes : {};
   const name = typeof attributes.friendly_name === "string" ? attributes.friendly_name : state.entity_id;
-  const collection = allowedCollection(name);
+  // Some AWSH installations expose a generic visible name while retaining the
+  // exact approved source in the entity id. This remains an exact allowlist,
+  // never a semantic search through other waste sensors.
+  const collection = allowedCollection(name) ?? allowedCollection(state.entity_id);
   const date = pickupDate(state.state);
   return collection && date ? { kind: collection.kind, label: collection.label, originalName: name.trim(), pickupDate: date, sourceEntityId: state.entity_id } : null;
 }

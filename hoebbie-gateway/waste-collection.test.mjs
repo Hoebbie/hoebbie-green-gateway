@@ -19,6 +19,11 @@ test("rejects paper, container sizes and other collection rhythms", () => {
   }
 });
 
+test("uses only an exact allowed AWSH entity id when its visible name is generic", () => {
+  assert.equal(wasteCollectionFromHomeAssistantState({ attributes: { friendly_name: "Nächste Leerung" }, entity_id: "sensor.awsh_bioabfall_2_wochentlich", state: "2026-09-03" })?.label, "Biotonne");
+  assert.equal(wasteCollectionFromHomeAssistantState({ attributes: { friendly_name: "Nächste Leerung" }, entity_id: "sensor.awsh_papiertonne_2_wochentlich", state: "2026-09-03" }), null);
+});
+
 test("rejects invalid entity ids and dates", () => {
   assert.equal(wasteCollectionFromHomeAssistantState({ ...state("Bioabfall(2-wöchentlich)"), entity_id: "calendar.awsh" }), null);
   assert.equal(wasteCollectionFromHomeAssistantState(state("Bioabfall(2-wöchentlich)", "morgen")), null);
