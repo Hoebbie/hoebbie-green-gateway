@@ -6,6 +6,7 @@ import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-d
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
+import { wasteCollectionFromHomeAssistantState } from "./waste-collection.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -310,6 +311,26 @@ async function reportInventory() {
   const entities = states.map((state) => discoveredEntity(state, areaNames)).filter((entity) => entity !== null);
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ entities, mode: "inventory" }) });
   if (!reported.ok) throw new Error("gateway.inventory_report_failed");
+}
+
+async function reportWasteCollection() {
+  const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
+  const states = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(states)) throw new Error("gateway.waste_read_failed");
+  const collections = new Map();
+  for (const state of states) {
+    const collection = wasteCollectionFromHomeAssistantState(state);
+    if (collection && !collections.has(collection.kind)) collections.set(collection.kind, collection);
+  }
+  const reported = await request(gatewayUrl, {
+    method: "POST",
+    headers: gatewayHeaders,
+    body: JSON.stringify({
+      collections: [...collections.values()].map(({ kind, originalName, pickupDate, sourceEntityId }) => ({ kind, originalName, pickupDate, sourceEntityId })),
+      mode: "waste_collection"
+    })
+  });
+  if (!reported.ok) throw new Error("gateway.waste_report_failed");
 }
 
 async function verifiedHomeState(expected) {
@@ -829,5 +850,8 @@ async function connectRealtime() {
 // Realtime- oder Netzwerkausfall. Er ersetzt kein Dauerpolling.
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();
+void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable")));
+const wasteCollectionRefresh = setInterval(() => { void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable"))); }, 6 * 60 * 60_000);
+wasteCollectionRefresh.unref?.();
 void connectRealtime();
 musicAssistantRealtime?.start();

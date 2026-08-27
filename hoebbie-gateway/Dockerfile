@@ -14,6 +14,7 @@ COPY radio-stream-metadata.mjs /app/radio-stream-metadata.mjs
 COPY queue-drain.mjs /app/queue-drain.mjs
 COPY realtime-protocol.mjs /app/realtime-protocol.mjs
 COPY routine-target.mjs /app/routine-target.mjs
+COPY waste-collection.mjs /app/waste-collection.mjs
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 CMD ["/run.sh"]
