@@ -6,7 +6,7 @@ import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-d
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
-import { wasteCollectionFromHomeAssistantState } from "./waste-collection.mjs";
+import { wasteCollectionFromHomeAssistantState, wasteCollectionSyncLog } from "./waste-collection.mjs";
 
 const required = (name) => {
   const value = process.env[name]?.trim();
@@ -331,6 +331,7 @@ async function reportWasteCollection() {
     })
   });
   if (!reported.ok) throw new Error("gateway.waste_report_failed");
+  console.info(wasteCollectionSyncLog(collections.size));
 }
 
 async function verifiedHomeState(expected) {

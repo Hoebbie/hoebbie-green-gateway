@@ -1,7 +1,7 @@
 name: Hoebbie Green Gateway
 slug: hoebbie_green_gateway
 description: Hoebbie-Geräteinventar und erlaubte Steuerung über einen ausgehenden Green-Gateway.
-version: "0.3.60"
+version: "0.3.61"
 url: https://github.com/Hoebbie/hoebbie-green-gateway
 arch:
   - aarch64

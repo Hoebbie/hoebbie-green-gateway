@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { wasteCollectionFromHomeAssistantState } from "./waste-collection.mjs";
+import { wasteCollectionFromHomeAssistantState, wasteCollectionSyncLog } from "./waste-collection.mjs";
 
 function state(name, date = "2026-09-03") {
   return { attributes: { friendly_name: name }, entity_id: "sensor.awsh_waste", state: date };
@@ -22,6 +22,11 @@ test("rejects paper, container sizes and other collection rhythms", () => {
 test("uses only an exact allowed AWSH entity id when its visible name is generic", () => {
   assert.equal(wasteCollectionFromHomeAssistantState({ attributes: { friendly_name: "Nächste Leerung" }, entity_id: "sensor.awsh_bioabfall_2_wochentlich", state: "2026-09-03" })?.label, "Biotonne");
   assert.equal(wasteCollectionFromHomeAssistantState({ attributes: { friendly_name: "Nächste Leerung" }, entity_id: "sensor.awsh_papiertonne_2_wochentlich", state: "2026-09-03" }), null);
+});
+
+test("reports only an aggregate count for the waste sync diagnostic", () => {
+  assert.equal(wasteCollectionSyncLog(3), "gateway.waste_sync:accepted_3");
+  assert.equal(wasteCollectionSyncLog(-1), "gateway.waste_sync:accepted_0");
 });
 
 test("rejects invalid entity ids and dates", () => {

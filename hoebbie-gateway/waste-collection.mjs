@@ -4,6 +4,11 @@ const allowedCollections = [
   { kind: "recycling", label: "Gelber Sack", names: ["wertstofflvp2wochentlich", "wertstofflvp2woechentlich"] }
 ];
 
+/** A privacy-preserving operational signal: it never contains entity IDs, names or dates. */
+export function wasteCollectionSyncLog(count) {
+  return `gateway.waste_sync:accepted_${Number.isInteger(count) && count >= 0 ? count : 0}`;
+}
+
 export function normalizeWasteSourceName(value) {
   return typeof value === "string"
     ? value.trim().toLocaleLowerCase("de-DE").replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "")
