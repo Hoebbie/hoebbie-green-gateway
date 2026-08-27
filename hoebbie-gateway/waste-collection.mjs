@@ -1,7 +1,7 @@
 const allowedCollections = [
-  { kind: "bio", label: "Biotonne", names: ["bioabfall2wochentlich", "bioabfall2woechentlich"] },
-  { kind: "residual", label: "Restmüll", names: ["restabfall40l240l2wochentlich", "restabfall40l240l2woechentlich"] },
-  { kind: "recycling", label: "Gelber Sack", names: ["wertstofflvp2wochentlich", "wertstofflvp2woechentlich"] }
+  { kind: "bio", label: "Biotonne", names: ["bioabfall2wochentlich", "bioabfall2woechentlich", "wastecollectionschedulebioabfall2wochentlich", "wastecollectionschedulebioabfall2woechentlich"] },
+  { kind: "residual", label: "Restmüll", names: ["restabfall40l240l2wochentlich", "restabfall40l240l2woechentlich", "wastecollectionschedulerestabfall40l240l2wochentlich", "wastecollectionschedulerestabfall40l240l2woechentlich"] },
+  { kind: "recycling", label: "Gelber Sack", names: ["wertstofflvp2wochentlich", "wertstofflvp2woechentlich", "wastecollectionschedulewertstofflvp2wochentlich", "wastecollectionschedulewertstofflvp2woechentlich"] }
 ];
 
 /** A privacy-preserving operational signal: it never contains entity IDs, names or dates. */
@@ -22,9 +22,17 @@ function allowedCollection(name) {
 
 function pickupDate(value) {
   if (typeof value !== "string") return null;
-  const match = /^(\d{4}-\d{2}-\d{2})(?:[T ].*)?$/.exec(value.trim());
-  if (!match || Number.isNaN(Date.parse(`${match[1]}T00:00:00.000Z`))) return null;
-  return match[1];
+  const trimmed = value.trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})(?:[T ].*)?$/.exec(trimmed);
+  if (iso && !Number.isNaN(Date.parse(`${iso[1]}T00:00:00.000Z`))) return iso[1];
+  // The installed Waste Collection Schedule integration exposes the next
+  // collection as e.g. "on Tue, 08.09.2026". This accepts only that fixed
+  // presentation and converts it before it leaves Home Assistant.
+  const localized = /^on\s+[a-z]{3},\s+(\d{2})\.(\d{2})\.(\d{4})$/i.exec(trimmed);
+  if (!localized) return null;
+  const [, day, month, year] = localized;
+  const date = new Date(`${year}-${month}-${day}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) || date.getUTCFullYear() !== Number(year) || date.getUTCMonth() + 1 !== Number(month) || date.getUTCDate() !== Number(day) ? null : `${year}-${month}-${day}`;
 }
 
 /** Returns only the three explicit AWSH sources; no fuzzy type or rhythm inference. */
