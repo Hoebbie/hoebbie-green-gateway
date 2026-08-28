@@ -30,10 +30,15 @@ der offizielle Index-/Zeitpfad ist `player_queues/play_index`.
 - ein erneut spielender Folgeraum verhindert die Erfolgsmeldung
 - Add-on-Version: 0.3.66
 
-## Noch nicht bereitgestellt
+## Bereitstellung
 
-Kein Push, Merge und keine Installation ohne erneute ausdrückliche Freigabe
-durch Lars.
+- Pull Request #23
+- Quellcommit `b1bdf851b938095811150e7be8b682abfe173dff`
+- Mergecommit `d408fb7d11e9b4867b77b8bb66a8d1fc5dab27b6`
+- Branch-Lauf #166, PR-Lauf #167 und nachgelagerter `main`-Lauf #168 grün
+- Add-on 0.3.66 in Home Assistant installiert und gestartet
+- Music-Assistant-Discovery mit sieben Playern sowie Realtime-Socket und
+  Realtime-Beitritt im Startprotokoll bestätigt
 
 ## Risiko
 
