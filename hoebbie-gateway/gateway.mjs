@@ -642,7 +642,7 @@ async function runMusicStartOnce() {
   if (!claimed.ok || !validMusicStartCommand(command)) throw new Error("gateway.music_profile_start_claim_invalid");
   let completion;
   try {
-    const snapshot = await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 30_000 : 15_000, "music_assistant.start_timeout");
+    const snapshot = await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 45_000 : 35_000, "music_assistant.start_timeout");
     if (command.mediaKind === "radio") {
       const radioSession = { stationTitle: snapshot.title, streamUri: command.mediaUri };
       activeRadioStreams.set(command.targetPlayerId, radioSession);
@@ -658,7 +658,7 @@ async function runMusicStartOnce() {
   // The report is deliberately detached: missing stream metadata must never
   // delay or turn a confirmed playback command into a failure.
   if (completion.success) void musicDiscoveryReporter.request();
-  console.info(`gateway.music_profile_start_completed:${completion.success ? "success" : "failed"}`);
+  console.info(`gateway.music_profile_start_completed:${completion.success ? "success" : `failed:${completion.errorCode}`}`);
   return true;
 }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MusicAssistantClient, MusicAssistantGatewayError, RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, radioStreamMetadata, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
+import { MusicAssistantClient, MusicAssistantGatewayError, MusicAssistantRealtime, RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, SOLOIST_PLAY_MEDIA_TIMEOUT_MILLISECONDS, musicAssistantRealtimeEvent, musicAssistantRealtimeObservation, radioStreamMetadata, validMusicAllRoomsCommand, validMusicAssistantConfig, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand, verifiedQueueSourceTime } from "./music-assistant-client.mjs";
 
 const config = { accessToken: "a".repeat(32), baseUrl: "http://music-assistant.local:8095/" };
 
@@ -115,6 +115,33 @@ test("does not block confirmed radio playback when the stream omits track metada
 
 test("gives Music Assistant a bounded cold-radio probe budget", () => {
   assert.equal(RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS, 20_000);
+  assert.equal(SOLOIST_PLAY_MEDIA_TIMEOUT_MILLISECONDS, 12_000);
+});
+
+test("confirms a Soloist start from state after the HTTP request times out", async () => {
+  const calls = [];
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request.command);
+    if (request.command === "player_queues/play_media") throw Object.assign(new Error("bounded"), { name: "TimeoutError" });
+    if (request.command === "players/get") return new Response(JSON.stringify({ available: true, group_members: [], name: "Küche", player_id: "sonos:kitchen", playback_state: "playing", powered: true, synced_to: null }), { status: 200 });
+    return new Response(JSON.stringify([{ current_item: { duration: 200, name: "Titel" }, elapsed_time: 0, queue_id: "sonos:kitchen", state: "playing" }]), { status: 200 });
+  });
+  const snapshot = await client.startPlayback({ commandId: "start-timeout", mediaKind: "playlist", mediaUri: "library://playlist/456", targetPlayerId: "sonos:kitchen" });
+  assert.equal(snapshot.sourcePlayerId, "sonos:kitchen");
+  assert.ok(calls.includes("player_queues/play_media"));
+});
+
+test("retains a safe HTTP status when Music Assistant rejects a Soloist start", async () => {
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.command === "players/get") return new Response(JSON.stringify({ available: true, group_members: [], name: "Küche", player_id: "sonos:kitchen", playback_state: "idle", powered: true, synced_to: null }), { status: 200 });
+    if (request.command === "player_queues/all") return new Response("[]", { status: 200 });
+    return new Response("Internal server error with private details", { status: 500 });
+  });
+  await assert.rejects(
+    client.startPlayback({ commandId: "start-http", mediaKind: "playlist", mediaUri: "library://playlist/456", targetPlayerId: "sonos:kitchen" }),
+    { code: "music_assistant.start_http_500" }
+  );
 });
 
 test("fails closed before a player command when the installed contract omits direct URI playback", async () => {
@@ -501,18 +528,83 @@ test("accepts only a bounded group with an explicit leader", () => {
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"], operation: "ungroup" }), true);
 });
 
-test("ungroups only the verified leader and reads every former member", async () => {
+test("ungroups every authorized former member and confirms that no residual group remains", async () => {
   const calls = [];
+  let playerReads = 0;
   const client = new MusicAssistantClient(config, async (_url, options) => {
     const request = JSON.parse(options.body);
     calls.push(request);
-    if (request.command === "players/cmd/ungroup") return new Response("null", { status: 200 });
+    if (request.command === "players/cmd/ungroup_many") return new Response("null", { status: 200 });
     const playerId = request.args.player_id;
-    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: "playing", powered: true, synced_to: null, group_members: [] }), { status: 200 });
+    const firstReadback = playerReads < 3;
+    playerReads += 1;
+    // This is the real regression: the requested leader is already standalone,
+    // while the two former followers have regrouped under a new coordinator.
+    const residualLeader = firstReadback && playerId === "sonos:dining";
+    const residualFollower = firstReadback && playerId === "sonos:living";
+    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: "playing", powered: true, synced_to: residualFollower ? "sonos:dining" : null, group_members: residualLeader ? ["sonos:dining", "sonos:living"] : [] }), { status: 200 });
   });
-  await client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:living"], operation: "ungroup" });
-  assert.equal(calls[0].command, "players/cmd/ungroup");
-  assert.deepEqual(calls[0].args, { player_id: "sonos:kitchen" });
+  await client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:dining", "sonos:living"], operation: "ungroup" });
+  assert.equal(calls[0].command, "players/cmd/ungroup_many");
+  assert.deepEqual(calls[0].args, { player_ids: ["sonos:kitchen", "sonos:dining", "sonos:living"] });
+  assert.equal(playerReads, 6);
+});
+
+test("a new single-room start stops the retained queue and dissolves a reassigned group first", async () => {
+  const calls = [];
+  let released = false;
+  let started = false;
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body); calls.push(request);
+    if (request.command === "player_queues/stop") return new Response("null", { status: 200 });
+    if (request.command === "players/cmd/ungroup_many") { released = true; return new Response("null", { status: 200 }); }
+    if (request.command === "player_queues/play_media") { started = true; return new Response("null", { status: 200 }); }
+    if (request.command === "players/get") {
+      const id = request.args.player_id;
+      const coordinator = id === "sonos:dining";
+      const follower = id !== "sonos:dining";
+      return new Response(JSON.stringify({
+        available: true,
+        group_members: !released && coordinator ? ["sonos:dining", "sonos:kitchen", "sonos:living"] : [],
+        name: id,
+        player_id: id,
+        playback_state: started && id === "sonos:kitchen" ? "playing" : "idle",
+        powered: true,
+        synced_to: !released && follower ? "sonos:dining" : null
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify(started ? [{ current_item: { duration: 200, name: "Neuer Titel" }, elapsed_time: 0, queue_id: "sonos:kitchen", state: "playing" }] : [{ current_item: { duration: 200, name: "Alter Titel" }, elapsed_time: 80, queue_id: "sonos:kitchen", state: "paused" }]), { status: 200 });
+  });
+  assert.equal(client.restoreProfileQueue("sonos:kitchen"), true);
+  const snapshot = await client.startPlayback({ commandId: "replace", mediaKind: "playlist", mediaUri: "library://playlist/new", targetPlayerId: "sonos:kitchen" });
+  assert.equal(snapshot.title, "Neuer Titel");
+  const commands = calls.map((call) => call.command);
+  assert.ok(commands.indexOf("player_queues/stop") < commands.indexOf("players/cmd/ungroup_many"));
+  assert.ok(commands.indexOf("players/cmd/ungroup_many") < commands.indexOf("player_queues/play_media"));
+  assert.deepEqual(calls.find((call) => call.command === "players/cmd/ungroup_many").args, { player_ids: ["sonos:kitchen", "sonos:dining", "sonos:living"] });
+});
+
+test("a Music Assistant socket error schedules recovery without recursively closing the socket", () => {
+  const previousWebSocket = globalThis.WebSocket;
+  class FakeWebSocket extends EventTarget {
+    static OPEN = 1;
+    static instances = [];
+    constructor() { super(); this.closeCalls = 0; this.readyState = 3; FakeWebSocket.instances.push(this); }
+    close() { this.closeCalls += 1; }
+    send() {}
+  }
+  globalThis.WebSocket = FakeWebSocket;
+  try {
+    const realtime = new MusicAssistantRealtime(config, () => undefined);
+    realtime.start();
+    const socket = FakeWebSocket.instances[0];
+    socket.dispatchEvent(new Event("error"));
+    assert.equal(socket.closeCalls, 0);
+    realtime.stop();
+    assert.equal(socket.closeCalls, 1);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
 });
 
 test("accepts only a verified E4.1 single-player volume command", async () => {

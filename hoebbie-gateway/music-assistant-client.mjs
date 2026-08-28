@@ -6,6 +6,7 @@ export class MusicAssistantGatewayError extends Error {
 }
 
 export const RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS = 20_000;
+export const SOLOIST_PLAY_MEDIA_TIMEOUT_MILLISECONDS = 12_000;
 
 function normalizedUrl(value) {
   let parsed;
@@ -553,6 +554,63 @@ export class MusicAssistantClient {
     throw new MusicAssistantGatewayError("music_assistant.shuffle_verification_failed", "Music Assistant hat Shuffle nicht bestätigt.");
   }
 
+  async #groupMemberIds(player) {
+    if (!player?.id) return [];
+    let leader = player;
+    if (player.syncedTo) leader = await this.getPlayer(player.syncedTo);
+    const memberIds = [...new Set([player.id, leader.id, ...leader.groupMembers].map(playerId).filter(Boolean))];
+    if (memberIds.length > 8) {
+      throw new MusicAssistantGatewayError("music_assistant.group_too_large", "Die aktuelle Raumgruppe ist größer als der freigegebene Rahmen.");
+    }
+    return memberIds;
+  }
+
+  async #ungroupMemberIds(memberIds) {
+    const normalizedIds = [...new Set(memberIds.map(playerId).filter(Boolean))];
+    if (normalizedIds.length < 2 || normalizedIds.length > 8) return normalizedIds;
+    // Music Assistant 2.9 exposes this exact bounded command for releasing
+    // every current member. Calling ungroup only on an assumed leader is not
+    // sufficient because Sonos may have reassigned the coordinator.
+    const actionResult = await this.command("players/cmd/ungroup_many", { player_ids: normalizedIds });
+    if (!actionResult.ok) {
+      throw new MusicAssistantGatewayError(`music_assistant.ungroup_http_${actionResult.status}`, "Music Assistant hat den Auflösungsauftrag nicht ausgeführt.");
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const states = await Promise.all(normalizedIds.map((id) => this.getPlayer(id)));
+      const allStandalone = states.every((state) => state.syncedTo === null && state.groupMembers.filter((id) => id !== state.id).length === 0);
+      if (allStandalone) return normalizedIds;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new MusicAssistantGatewayError("music_assistant.ungroup_verification_failed", "Music Assistant hat das vollständige Auflösen der Gruppe nicht bestätigt.");
+  }
+
+  async #releaseCurrentSession(target) {
+    const groups = [];
+    const targetGroup = await this.#groupMemberIds(target);
+    if (targetGroup.length >= 2) groups.push(targetGroup);
+
+    const priorQueueId = this.#profileQueueId;
+    if (priorQueueId) {
+      let priorPlayer = target.id === priorQueueId ? target : null;
+      if (!priorPlayer) {
+        try { priorPlayer = await this.getPlayer(priorQueueId); }
+        catch (error) {
+          if (!(error instanceof MusicAssistantGatewayError) || error.code !== "music_assistant.state_unavailable") throw error;
+        }
+      }
+      if (priorPlayer?.available) {
+        const priorGroup = await this.#groupMemberIds(priorPlayer);
+        if (priorGroup.length >= 2 && !groups.some((group) => group.length === priorGroup.length && group.every((id) => priorGroup.includes(id)))) groups.push(priorGroup);
+        const stopped = await this.command("player_queues/stop", { queue_id: priorQueueId });
+        if (!stopped.ok) {
+          throw new MusicAssistantGatewayError(`music_assistant.session_stop_http_${stopped.status}`, "Music Assistant hat die vorherige Wiedergabe nicht beendet.");
+        }
+      }
+    }
+
+    for (const group of groups) await this.#ungroupMemberIds(group);
+  }
+
   /** Replaces one fixed target queue with the server-authorized media URI and
    * returns only after the target is observed playing. The URI never appears
    * in logs, snapshots or mobile responses. */
@@ -565,11 +623,28 @@ export class MusicAssistantClient {
     const target = await this.getPlayer(command.targetPlayerId);
     if (!target.available) throw new MusicAssistantGatewayError("music_assistant.start_target_unavailable", "Der gewählte Raum ist momentan nicht erreichbar.");
     const before = await this.queueSnapshot(command.targetPlayerId);
+    // A fresh Hoebbie start owns the one retained profile session. Release its
+    // old queue and any group around the old or new target before replacing
+    // media, so selecting one room cannot inherit an earlier all-room group.
+    await this.#releaseCurrentSession(target);
+    const releasedTarget = await this.getPlayer(command.targetPlayerId);
+    if (!releasedTarget.available || releasedTarget.syncedTo !== null || releasedTarget.groupMembers.filter((id) => id !== releasedTarget.id).length > 0) {
+      throw new MusicAssistantGatewayError("music_assistant.start_target_grouped", "Der gewählte Raum konnte nicht als Einzelziel bestätigt werden.");
+    }
     // Music Assistant resolves a plain URL through its builtin provider before
-    // queueing it. Radio probing can legitimately take longer than the normal
-    // five-second JSON-RPC budget, especially after redirects or a cold cache.
-    const result = await this.command("player_queues/play_media", { media: command.mediaUri, option: "replace", queue_id: command.targetPlayerId, radio_mode: false }, command.mediaKind === "radio" ? RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS : 5_000);
-    if (!result.ok) throw new MusicAssistantGatewayError("music_assistant.start_failed", "Music Assistant hat den Musikstart nicht ausgeführt.");
+    // queueing it. Radio probing and Soloist's first queue start can both take
+    // longer than the normal five-second JSON-RPC budget.
+    let result = null;
+    let requestTimedOut = false;
+    try {
+      result = await this.command("player_queues/play_media", { media: command.mediaUri, option: "replace", queue_id: command.targetPlayerId, radio_mode: false }, command.mediaKind === "radio" ? RADIO_PLAY_MEDIA_TIMEOUT_MILLISECONDS : SOLOIST_PLAY_MEDIA_TIMEOUT_MILLISECONDS);
+    } catch (error) {
+      if (!(error instanceof MusicAssistantGatewayError) || error.code !== "music_assistant.request_timeout") throw error;
+      // The HTTP client can time out after Music Assistant accepted the
+      // command. The bounded state readback below is the authority.
+      requestTimedOut = true;
+    }
+    if (!requestTimedOut && !result?.ok) throw new MusicAssistantGatewayError(`music_assistant.start_http_${result?.status ?? 0}`, "Music Assistant hat den Musikstart nicht ausgeführt.");
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const snapshot = await this.queueSnapshot(command.targetPlayerId);
       const observedTarget = await this.getPlayer(command.targetPlayerId);
@@ -648,14 +723,7 @@ export class MusicAssistantClient {
 
   async ungroupPlayers(command) {
     if (!validMusicGroupCommand(command) || command.operation !== "ungroup") throw new MusicAssistantGatewayError("music_assistant.invalid_ungroup_command", "Der freigegebene Auflösungsauftrag ist ungültig.");
-    const actionResult = await this.command("players/cmd/ungroup", { player_id: command.leaderPlayerId });
-    if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.ungroup_command_failed", "Music Assistant hat den Auflösungsauftrag nicht ausgeführt.");
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const states = await Promise.all(command.memberPlayerIds.map((id) => this.getPlayer(id)));
-      if (states.every((player) => player.syncedTo !== command.leaderPlayerId) && !states.some((player) => player.id === command.leaderPlayerId && player.groupMembers.length >= 2)) return command.memberPlayerIds;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    throw new MusicAssistantGatewayError("music_assistant.ungroup_verification_failed", "Music Assistant hat das Auflösen der Gruppe nicht bestätigt.");
+    return this.#ungroupMemberIds(command.memberPlayerIds);
   }
 
   /**
@@ -741,11 +809,15 @@ export class MusicAssistantClient {
         method: "POST",
         signal: AbortSignal.timeout(timeoutMilliseconds)
       });
-    } catch {
+    } catch (error) {
+      if (error && typeof error === "object" && (error.name === "TimeoutError" || error.code === "ABORT_ERR")) {
+        throw new MusicAssistantGatewayError("music_assistant.request_timeout", "Music Assistant hat nicht innerhalb des begrenzten Zeitfensters geantwortet.");
+      }
       throw new MusicAssistantGatewayError("music_assistant.connection_failed", "Music Assistant ist über die konfigurierte lokale Adresse nicht erreichbar.");
     }
-    if (!response.ok) return { ok: false, payload: null };
-    return { ok: true, payload: await response.json().catch(() => null) };
+    if (response.status === 401 || response.status === 403) throw new MusicAssistantGatewayError("music_assistant.authentication_failed", "Der Music-Assistant-Zugang wurde abgelehnt.");
+    if (!response.ok) return { ok: false, payload: null, status: response.status };
+    return { ok: true, payload: await response.json().catch(() => null), status: response.status };
   }
 
   async getPlayer(id) {
@@ -779,6 +851,7 @@ export class MusicAssistantRealtime {
   stop() {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     this.socket?.close();
   }
 
@@ -788,15 +861,22 @@ export class MusicAssistantRealtime {
     url.pathname = `${url.pathname.replace(/\/$/, "")}/ws`;
     const socket = new WebSocket(url);
     this.socket = socket;
+    const scheduleReconnect = () => {
+      if (this.stopped || this.socket !== socket || this.reconnectTimer) return;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (!this.stopped && this.socket === socket && socket.readyState !== WebSocket.OPEN) this.connect();
+      }, 1_000);
+    };
     socket.addEventListener("open", () => socket.send(JSON.stringify({ args: { token: this.config.accessToken }, command: "auth", message_id: "hoebbie-green" })));
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
       const observation = musicAssistantRealtimeObservation(message);
       if (observation) this.onEvent(observation);
     });
-    socket.addEventListener("close", () => {
-      if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), 1_000);
-    });
-    socket.addEventListener("error", () => socket.close());
+    socket.addEventListener("close", scheduleReconnect);
+    // Undici already fails and closes the connection. Calling close() again
+    // from its error event can synchronously emit another error and recurse.
+    socket.addEventListener("error", scheduleReconnect, { once: true });
   }
 }
