@@ -7,13 +7,12 @@ Add-on-Version: `0.3.64`
 
 Supabase Broadcast bleibt der schnelle Primärpfad und enthält weiterhin keine
 ausführbare Aktion. Verpasst Green dieses Wecksignal, fragt der vorhandene
-serverautorisierte Claim-Pfad die dauerhaften Warteschlangen nun spätestens
-nach zehn Sekunden erneut ab. Vorher geschah das erst nach fünf Minuten.
+serverautorisierte Claim-Pfad die dauerhafte Gruppenqueue nun spätestens nach
+15 Sekunden erneut ab. Vorher geschah das erst nach fünf Minuten.
 
-Die kürzeste aktuelle serverseitige Auftragsfrist beträgt 20 Sekunden. Der
-Ersatzabruf liegt damit bei höchstens der Hälfte dieser Frist; der konkrete
-Gruppenauftrag mit 90 Sekunden Laufzeit kann nicht mehr vor dem nächsten
-Ersatzabruf verfallen.
+Der Gruppenauftrag hat 90 Sekunden Laufzeit und kann damit nicht mehr vor dem
+nächsten Ersatzabruf verfallen. Unabhängige Worker werden bewusst nicht
+häufiger abgefragt; der breite Fünf-Minuten-Abgleich bleibt unverändert.
 
 ## Offizielle Referenz
 
@@ -30,8 +29,8 @@ Quelle der Wahrheit und nutzt Broadcast ausschließlich als Wecksignal.
 
 - 97/97 Node-Tests grün.
 - Syntaxprüfung für Gateway und Queue-Drain grün.
-- Regressionstest: Der Ersatzabruf bleibt positiv und liegt höchstens bei der
-  Hälfte der kürzesten bekannten Auftragsfrist.
+- Regressionstest: Der Gruppen-Ersatzabruf bleibt positiv und liegt höchstens
+  bei der Hälfte der 90-sekündigen Gruppenauftragsfrist.
 - Realtime-Protokoll, Queue-Drain, Music-Assistant-Adapter, Docker-
   Importvertrag und übrige Gateway-Tests grün.
 - Diff-Prüfung und Secret-Suche ohne neuen Befund; die beiden Treffer in

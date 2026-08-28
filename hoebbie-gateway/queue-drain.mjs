@@ -1,9 +1,8 @@
-// Database-backed commands remain the source of truth when a transient
-// Supabase Broadcast is missed. The shortest current server-side lifetime is
-// 20 seconds (catalog queries), so the recovery pass must run with enough
-// margin to claim work before that deadline.
-export const SHORTEST_COMMAND_LIFETIME_MS = 20_000;
-export const COMMAND_RECOVERY_INTERVAL_MS = 10_000;
+// Database-backed group commands remain the source of truth when a transient
+// Supabase Broadcast is missed. They expire after 90 seconds, so the focused
+// recovery pass keeps ample margin without polling unrelated workers.
+export const GROUP_COMMAND_LIFETIME_MS = 90_000;
+export const GROUP_COMMAND_RECOVERY_INTERVAL_MS = 15_000;
 
 export class BoundedQueueDrain {
   #active = null;

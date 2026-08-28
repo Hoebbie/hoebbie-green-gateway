@@ -3,15 +3,15 @@ import test from "node:test";
 
 import {
   BoundedQueueDrain,
-  COMMAND_RECOVERY_INTERVAL_MS,
   CoalescedAsyncTask,
-  SHORTEST_COMMAND_LIFETIME_MS,
+  GROUP_COMMAND_LIFETIME_MS,
+  GROUP_COMMAND_RECOVERY_INTERVAL_MS,
   withinDeadline
 } from "./queue-drain.mjs";
 
-test("keeps the missed-broadcast recovery inside the shortest command lifetime", () => {
-  assert.ok(COMMAND_RECOVERY_INTERVAL_MS > 0);
-  assert.ok(COMMAND_RECOVERY_INTERVAL_MS <= SHORTEST_COMMAND_LIFETIME_MS / 2);
+test("keeps missed group-broadcast recovery inside the group command lifetime", () => {
+  assert.ok(GROUP_COMMAND_RECOVERY_INTERVAL_MS > 0);
+  assert.ok(GROUP_COMMAND_RECOVERY_INTERVAL_MS <= GROUP_COMMAND_LIFETIME_MS / 2);
 });
 
 test("drains a bounded command queue until it is empty", async () => {

@@ -12,8 +12,8 @@ beim Green-Gateway ankommt.
 
 - Realtime bleibt der unveränderte Primärpfad.
 - Die bestehenden Datenbank-Claims bleiben die einzige Auftragsquelle.
-- Der vorhandene Ersatzabruf wird so verkürzt, dass er vor der kürzesten
-  aktuellen Auftragsfrist läuft.
+- Nur die betroffene Gruppenqueue erhält einen kurzen Ersatzabruf, der sicher
+  vor ihrer aktuellen Auftragsfrist läuft.
 - Ein Regressionstest hält diese Timing-Beziehung fest.
 
 App, Alfred, Music-Assistant-Kommandos, Gruppierungslogik, Datenbank und Edge
