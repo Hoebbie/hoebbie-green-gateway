@@ -50,3 +50,13 @@ produktspezifische Regel, dass die serverbestimmte Führung erhalten bleibt.
 Das konkrete zeitliche Verhalten von Sonos/Soloist wird abschließend erst am
 realen System belegt. Der Fix ist begrenzt und meldet bei abweichendem Verhalten
 geschlossen einen Fehler.
+
+## Rollout
+
+- Green-Main-Commit: `28e141f717569c41c0aba51e86ed2e7997c8e9eb`
+- GitHub Green Add-on CI #164: erfolgreich
+- installierte und rückgelesene Add-on-Version: 0.3.65
+- Add-on-Status: läuft
+- Realtime-Verbindung und Music-Assistant-Inventar nach dem Neustart bestätigt
+
+Der reale Entgruppierungs-Smoke bleibt der einzige offene Nachweis.
