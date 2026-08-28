@@ -572,17 +572,45 @@ export class MusicAssistantClient {
     if (preservePlayerId !== null && (!preservedId || !normalizedIds.includes(preservedId))) {
       throw new MusicAssistantGatewayError("music_assistant.ungroup_preserved_player_invalid", "Der führende Raum gehört nicht zur freigegebenen Gruppe.");
     }
-    const preservedBefore = preservedId ? await this.getPlayer(preservedId) : null;
-    const queueBefore = preservedId ? await this.queueSnapshot(preservedId, true) : null;
-    if (preservedBefore?.isPlaying && (!queueBefore?.isPlaying || !queueBefore.title || queueBefore.queueIndex === null || queueBefore.progressSeconds === null)) {
+    if (!preservedId) {
+      const actionResult = await this.command("players/cmd/ungroup_many", { player_ids: normalizedIds });
+      if (!actionResult.ok) {
+        throw new MusicAssistantGatewayError(`music_assistant.ungroup_http_${actionResult.status}`, "Music Assistant hat den Auflösungsauftrag nicht ausgeführt.");
+      }
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const states = await Promise.all(normalizedIds.map((id) => this.getPlayer(id)));
+        const allStandalone = states.every((state) => state.syncedTo === null && state.groupMembers.filter((id) => id !== state.id).length === 0);
+        if (allStandalone) return normalizedIds;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      throw new MusicAssistantGatewayError("music_assistant.ungroup_verification_failed", "Music Assistant hat das vollständige Auflösen der Gruppe nicht bestätigt.");
+    }
+
+    // Music Assistant 2.10 deliberately transfers leadership when `ungroup`
+    // targets the current leader. Therefore the preserve path must prove the
+    // topology first and release followers only. Including the leader in
+    // `ungroup_many` would eventually process the transferred leader as well
+    // and stop the queue.
+    const statesBefore = await Promise.all(normalizedIds.map((id) => this.getPlayer(id)));
+    const preservedBefore = statesBefore.find((state) => state.id === preservedId) ?? null;
+    const followerIds = normalizedIds.filter((id) => id !== preservedId);
+    const followersBefore = statesBefore.filter((state) => followerIds.includes(state.id));
+    const topologyConfirmed = preservedBefore?.syncedTo === null
+      && followersBefore.length === followerIds.length
+      && followersBefore.every((state) => state.syncedTo === preservedId)
+      && (preservedBefore.groupMembers.length === 0 || followerIds.every((id) => preservedBefore.groupMembers.includes(id)));
+    if (!topologyConfirmed) {
+      throw new MusicAssistantGatewayError("music_assistant.ungroup_preserved_player_not_leader", "Der zu erhaltende Wiedergaberaum ist nicht mehr der bestätigte Gruppen-Leader.");
+    }
+    const queueBefore = await this.queueSnapshot(preservedId, true);
+    if (preservedBefore.isPlaying && (!queueBefore?.isPlaying || !queueBefore.title || queueBefore.queueIndex === null || queueBefore.progressSeconds === null)) {
       throw new MusicAssistantGatewayError("music_assistant.ungroup_queue_unavailable", "Die laufende Leader-Queue konnte vor dem Auflösen nicht bestätigt werden.");
     }
-    // Music Assistant 2.9 exposes this exact bounded command for releasing
-    // every current member. Calling ungroup only on an assumed leader is not
-    // sufficient because Sonos may have reassigned the coordinator.
-    const actionResult = await this.command("players/cmd/ungroup_many", { player_ids: normalizedIds });
-    if (!actionResult.ok) {
-      throw new MusicAssistantGatewayError(`music_assistant.ungroup_http_${actionResult.status}`, "Music Assistant hat den Auflösungsauftrag nicht ausgeführt.");
+    for (const followerId of followerIds) {
+      const actionResult = await this.command("players/cmd/ungroup", { player_id: followerId });
+      if (!actionResult.ok) {
+        throw new MusicAssistantGatewayError(`music_assistant.ungroup_http_${actionResult.status}`, "Music Assistant hat einen Folgeraum nicht aus der Gruppe gelöst.");
+      }
     }
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const states = await Promise.all(normalizedIds.map((id) => this.getPlayer(id)));
@@ -594,31 +622,6 @@ export class MusicAssistantClient {
       }
     }
 
-    // Sonos may turn former followers into standalone groups which still share
-    // the same playback session. Sonos transport commands target that session,
-    // not safely one freshly detached speaker. Stop a still-playing follower
-    // only to clear the shared session, then resume the already confirmed
-    // leader queue at its prior index and position through Music Assistant's
-    // official queue command.
-    const stoppedIds = normalizedIds.filter((id) => id !== preservedId);
-    let stoppedSharedSession = false;
-    for (const id of stoppedIds) {
-      const state = await this.getPlayer(id);
-      if (!state.isPlaying) continue;
-      const stopped = await this.command("player_queues/stop", { queue_id: id });
-      if (!stopped.ok) {
-        throw new MusicAssistantGatewayError(`music_assistant.ungroup_stop_http_${stopped.status}`, "Music Assistant hat eine abgelöste Wiedergabe nicht beendet.");
-      }
-      stoppedSharedSession = true;
-    }
-    const preservedAfterUngroup = preservedId ? await this.getPlayer(preservedId) : null;
-    const mustResumeLeader = Boolean(queueBefore?.isPlaying && preservedId && (stoppedSharedSession || !preservedAfterUngroup?.isPlaying));
-    if (mustResumeLeader) {
-      const resumed = await this.command("player_queues/play_index", { index: queueBefore.queueIndex, queue_id: preservedId, seek_position: queueBefore.progressSeconds });
-      if (!resumed.ok) {
-        throw new MusicAssistantGatewayError(`music_assistant.ungroup_resume_http_${resumed.status}`, "Music Assistant hat die Leader-Queue nach dem Auflösen nicht fortgesetzt.");
-      }
-    }
     let stableReadbacks = 0;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const states = await Promise.all(normalizedIds.map((id) => this.getPlayer(id)));
@@ -633,7 +636,7 @@ export class MusicAssistantClient {
         && queueAfter.progressSeconds >= Math.max(0, queueBefore.progressSeconds - 5)
       );
       const clean = states.every((state) => state.syncedTo === null && state.groupMembers.filter((id) => id !== state.id).length === 0)
-        && states.filter((state) => stoppedIds.includes(state.id)).every((state) => !state.isPlaying)
+        && states.filter((state) => followerIds.includes(state.id)).every((state) => !state.isPlaying)
         && queuePreserved;
       stableReadbacks = clean ? stableReadbacks + 1 : 0;
       if (stableReadbacks >= 2) return normalizedIds;
