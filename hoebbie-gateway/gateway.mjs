@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { radioStreamMetadata } from "./radio-stream-metadata.mjs";
-import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
+import { BoundedQueueDrain, COMMAND_RECOVERY_INTERVAL_MS, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
 import { decodeRealtimeMessage, heartbeatMessage, isCommandReady, isInventoryRefresh, joinMessage, realtimeSocketUrl, realtimeTopic, validRealtimeSession } from "./realtime-protocol.mjs";
@@ -847,9 +847,10 @@ async function connectRealtime() {
   }
 }
 
-// Der seltene Abgleich holt ausschließlich verpasste Aufträge nach einem
-// Realtime- oder Netzwerkausfall. Er ersetzt kein Dauerpolling.
-setInterval(() => { void drainCommands(); }, 5 * 60_000);
+// Supabase Broadcast is the low-latency wake-up, while the durable queues are
+// the source of truth. This bounded recovery pass claims a missed wake-up
+// before even the shortest server-side command can expire.
+setInterval(() => { void drainCommands(); }, COMMAND_RECOVERY_INTERVAL_MS);
 void drainCommands();
 void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable")));
 const wasteCollectionRefresh = setInterval(() => { void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable"))); }, 6 * 60 * 60_000);

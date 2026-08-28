@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BoundedQueueDrain, CoalescedAsyncTask, withinDeadline } from "./queue-drain.mjs";
+import {
+  BoundedQueueDrain,
+  COMMAND_RECOVERY_INTERVAL_MS,
+  CoalescedAsyncTask,
+  SHORTEST_COMMAND_LIFETIME_MS,
+  withinDeadline
+} from "./queue-drain.mjs";
+
+test("keeps the missed-broadcast recovery inside the shortest command lifetime", () => {
+  assert.ok(COMMAND_RECOVERY_INTERVAL_MS > 0);
+  assert.ok(COMMAND_RECOVERY_INTERVAL_MS <= SHORTEST_COMMAND_LIFETIME_MS / 2);
+});
 
 test("drains a bounded command queue until it is empty", async () => {
   const results = [true, true, false];
