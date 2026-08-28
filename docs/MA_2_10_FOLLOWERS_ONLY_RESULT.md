@@ -37,8 +37,14 @@ leeren. Der Followers-only-Pfad vermeidet beide Mutationen.
 
 ## Bereitstellung
 
-Noch nicht erfolgt. Pull Request, Commits, CI-Läufe und Home-Assistant-Nachweis
-werden nach der freigegebenen Bereitstellung ergänzt.
+- Branch `codex/ma-2-10-followers-only`
+- Quellcommit `9e5ba946f863ac6d72a1090dff6241816aa2c48e`
+- Pull Request #25; Mergecommit
+  `8380fb4add65de362a46122686f1cacfb714234c`
+- Branch-Lauf #172, PR-Lauf #173 und nachgelagerter `main`-Lauf #174 grün
+- Add-on 0.3.67 in Home Assistant installiert und gestartet
+- Startprotokoll bestätigt Music-Assistant-Discovery sowie offenen und
+  beigetretenen Realtime-Socket
 
 ## Risiko
 
