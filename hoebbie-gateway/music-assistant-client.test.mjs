@@ -528,13 +528,18 @@ test("accepts only a bounded group with an explicit leader", () => {
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"], operation: "ungroup" }), true);
 });
 
-test("ungroups every authorized former member and confirms that no residual group remains", async () => {
+test("ungroups every authorized former member, preserves the leader and stops former followers", async () => {
   const calls = [];
   let playerReads = 0;
+  const stoppedPlayers = new Set();
   const client = new MusicAssistantClient(config, async (_url, options) => {
     const request = JSON.parse(options.body);
     calls.push(request);
     if (request.command === "players/cmd/ungroup_many") return new Response("null", { status: 200 });
+    if (request.command === "player_queues/stop") {
+      stoppedPlayers.add(request.args.queue_id);
+      return new Response("null", { status: 200 });
+    }
     const playerId = request.args.player_id;
     const firstReadback = playerReads < 3;
     playerReads += 1;
@@ -542,12 +547,36 @@ test("ungroups every authorized former member and confirms that no residual grou
     // while the two former followers have regrouped under a new coordinator.
     const residualLeader = firstReadback && playerId === "sonos:dining";
     const residualFollower = firstReadback && playerId === "sonos:living";
-    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: "playing", powered: true, synced_to: residualFollower ? "sonos:dining" : null, group_members: residualLeader ? ["sonos:dining", "sonos:living"] : [] }), { status: 200 });
+    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: playerId === "sonos:kitchen" || !stoppedPlayers.has(playerId) ? "playing" : "idle", powered: true, synced_to: residualFollower ? "sonos:dining" : null, group_members: residualLeader ? ["sonos:dining", "sonos:living"] : [] }), { status: 200 });
   });
   await client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:dining", "sonos:living"], operation: "ungroup" });
   assert.equal(calls[0].command, "players/cmd/ungroup_many");
   assert.deepEqual(calls[0].args, { player_ids: ["sonos:kitchen", "sonos:dining", "sonos:living"] });
-  assert.equal(playerReads, 6);
+  assert.deepEqual(calls.filter((call) => call.command === "player_queues/stop").map((call) => call.args.queue_id), ["sonos:dining", "sonos:living"]);
+  assert.equal(playerReads, 12);
+});
+
+test("does not report a successful ungroup while a former follower resumes playback", async () => {
+  let readbacksAfterStop = 0;
+  const client = new MusicAssistantClient(config, async (_url, options) => {
+    const request = JSON.parse(options.body);
+    if (request.command === "players/cmd/ungroup_many" || request.command === "player_queues/stop") return new Response("null", { status: 200 });
+    const id = request.args.player_id;
+    readbacksAfterStop += 1;
+    return new Response(JSON.stringify({
+      available: true,
+      group_members: [],
+      name: id,
+      player_id: id,
+      playback_state: id === "sonos:dining" && readbacksAfterStop > 4 ? "playing" : "idle",
+      powered: true,
+      synced_to: null
+    }), { status: 200 });
+  });
+  await assert.rejects(
+    client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:dining"], operation: "ungroup" }),
+    { code: "music_assistant.ungroup_playback_verification_failed" }
+  );
 });
 
 test("a new single-room start stops the retained queue and dissolves a reassigned group first", async () => {
