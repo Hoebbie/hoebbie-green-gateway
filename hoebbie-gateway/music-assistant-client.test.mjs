@@ -528,49 +528,53 @@ test("accepts only a bounded group with an explicit leader", () => {
   assert.equal(validMusicGroupCommand({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:living", "sonos:kitchen"], operation: "ungroup" }), true);
 });
 
-test("ungroups every authorized former member, preserves the leader and stops former followers", async () => {
+test("ungroups every authorized former member and resumes only the unchanged leader queue", async () => {
   const calls = [];
-  let playerReads = 0;
-  const stoppedPlayers = new Set();
+  let released = false;
+  let sharedSessionStopped = false;
+  let leaderResumed = false;
   const client = new MusicAssistantClient(config, async (_url, options) => {
     const request = JSON.parse(options.body);
     calls.push(request);
-    if (request.command === "players/cmd/ungroup_many") return new Response("null", { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_index: 4, current_item: { name: "Titel" }, elapsed_time: leaderResumed ? 74 : 73, queue_id: "sonos:kitchen", state: leaderResumed || !sharedSessionStopped ? "playing" : "idle" }]), { status: 200 });
+    if (request.command === "player_queues/items") return new Response("[]", { status: 200 });
+    if (request.command === "players/cmd/ungroup_many") { released = true; return new Response("null", { status: 200 }); }
     if (request.command === "player_queues/stop") {
-      stoppedPlayers.add(request.args.queue_id);
+      sharedSessionStopped = true;
       return new Response("null", { status: 200 });
     }
+    if (request.command === "player_queues/play_index") { leaderResumed = true; return new Response("null", { status: 200 }); }
     const playerId = request.args.player_id;
-    const firstReadback = playerReads < 3;
-    playerReads += 1;
-    // This is the real regression: the requested leader is already standalone,
-    // while the two former followers have regrouped under a new coordinator.
-    const residualLeader = firstReadback && playerId === "sonos:dining";
-    const residualFollower = firstReadback && playerId === "sonos:living";
-    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: playerId === "sonos:kitchen" || !stoppedPlayers.has(playerId) ? "playing" : "idle", powered: true, synced_to: residualFollower ? "sonos:dining" : null, group_members: residualLeader ? ["sonos:dining", "sonos:living"] : [] }), { status: 200 });
+    const leader = playerId === "sonos:kitchen";
+    const playing = !released || leaderResumed ? leader : !sharedSessionStopped;
+    return new Response(JSON.stringify({ available: true, name: playerId, player_id: playerId, playback_state: playing ? "playing" : "idle", powered: true, synced_to: !released && !leader ? "sonos:kitchen" : null, group_members: !released && leader ? ["sonos:kitchen", "sonos:dining", "sonos:living"] : [] }), { status: 200 });
   });
   await client.ungroupPlayers({ commandId: "command", leaderPlayerId: "sonos:kitchen", memberPlayerIds: ["sonos:kitchen", "sonos:dining", "sonos:living"], operation: "ungroup" });
-  assert.equal(calls[0].command, "players/cmd/ungroup_many");
-  assert.deepEqual(calls[0].args, { player_ids: ["sonos:kitchen", "sonos:dining", "sonos:living"] });
-  assert.deepEqual(calls.filter((call) => call.command === "player_queues/stop").map((call) => call.args.queue_id), ["sonos:dining", "sonos:living"]);
-  assert.equal(playerReads, 12);
+  assert.deepEqual(calls.find((call) => call.command === "players/cmd/ungroup_many").args, { player_ids: ["sonos:kitchen", "sonos:dining", "sonos:living"] });
+  assert.deepEqual(calls.filter((call) => call.command === "player_queues/stop").map((call) => call.args.queue_id), ["sonos:dining"]);
+  assert.deepEqual(calls.filter((call) => call.command === "player_queues/play_index").map((call) => call.args), [{ index: 4, queue_id: "sonos:kitchen", seek_position: 73 }]);
 });
 
 test("does not report a successful ungroup while a former follower resumes playback", async () => {
-  let readbacksAfterStop = 0;
+  let released = false;
+  let sharedSessionStopped = false;
+  let leaderResumed = false;
   const client = new MusicAssistantClient(config, async (_url, options) => {
     const request = JSON.parse(options.body);
-    if (request.command === "players/cmd/ungroup_many" || request.command === "player_queues/stop") return new Response("null", { status: 200 });
+    if (request.command === "player_queues/all") return new Response(JSON.stringify([{ current_index: 4, current_item: { name: "Titel" }, elapsed_time: 73, queue_id: "sonos:kitchen", state: leaderResumed || !sharedSessionStopped ? "playing" : "idle" }]), { status: 200 });
+    if (request.command === "player_queues/items") return new Response("[]", { status: 200 });
+    if (request.command === "players/cmd/ungroup_many") { released = true; return new Response("null", { status: 200 }); }
+    if (request.command === "player_queues/stop") { sharedSessionStopped = true; return new Response("null", { status: 200 }); }
+    if (request.command === "player_queues/play_index") { leaderResumed = true; return new Response("null", { status: 200 }); }
     const id = request.args.player_id;
-    readbacksAfterStop += 1;
     return new Response(JSON.stringify({
       available: true,
-      group_members: [],
+      group_members: !released && id === "sonos:kitchen" ? ["sonos:kitchen", "sonos:dining"] : [],
       name: id,
       player_id: id,
-      playback_state: id === "sonos:dining" && readbacksAfterStop > 4 ? "playing" : "idle",
+      playback_state: id === "sonos:kitchen" ? (leaderResumed || !sharedSessionStopped ? "playing" : "idle") : released && leaderResumed ? "playing" : !sharedSessionStopped ? "playing" : "idle",
       powered: true,
-      synced_to: null
+      synced_to: !released && id === "sonos:dining" ? "sonos:kitchen" : null
     }), { status: 200 });
   });
   await assert.rejects(
