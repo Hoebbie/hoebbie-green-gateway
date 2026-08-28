@@ -40,7 +40,20 @@ Quelle der Wahrheit und nutzt Broadcast ausschließlich als Wecksignal.
   Gruppierungssemantik. Geräteformat- und Accessibility-Prüfungen sind für
   diesen reinen Gateway-Timing-Fix nicht einschlägig.
 
-## Rollout-Grenze
+## Rollout und reale Prüfung
 
-Dieses Paket ändert ausschließlich das Green-Add-on. Ein Update des laufenden
-Add-ons erfolgt erst nach Lars' ausdrücklicher Deployment-Freigabe.
+Nach Lars' ausdrücklicher Freigabe wurde Commit
+`6df0c8a582b158fa5ccf3ebcbfac7d64ba2de3d0` per Fast-forward auf Green-`main`
+übernommen. GitHub Actions Lauf `33182177644` war vollständig grün.
+
+Home Assistant hat Add-on-Version `0.3.64` gebaut, installiert und erfolgreich
+gestartet. Die reale Prüfung bestätigte:
+
+- installierte und neueste Version jeweils `0.3.64`
+- laufender Add-on-Zustand
+- erfolgreiches `gateway.realtime_joined`
+- über mehr als einen 15-Sekunden-Gruppenzyklus kein zusätzlicher Fehler des
+  unabhängigen Album-Workers
+
+Der zunächst festhängende Store-Abruf löste sich selbst; ein Neustart des
+Home-Assistant-Supervisors war nicht erforderlich.
