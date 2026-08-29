@@ -12,6 +12,7 @@ COPY gateway-response.mjs /app/gateway-response.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs
 COPY personal-profile-status.mjs /app/personal-profile-status.mjs
 COPY radio-stream-metadata.mjs /app/radio-stream-metadata.mjs
+COPY read-only-reporter.mjs /app/read-only-reporter.mjs
 COPY queue-drain.mjs /app/queue-drain.mjs
 COPY realtime-protocol.mjs /app/realtime-protocol.mjs
 COPY routine-target.mjs /app/routine-target.mjs
