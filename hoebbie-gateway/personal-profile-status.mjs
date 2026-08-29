@@ -84,21 +84,22 @@ function zoneName(value) {
 
 function observedAt(states) {
   const timestamps = states
-    .map((state) => typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : null)
-    .filter((value) => value !== null)
+    .map(stateTimestamp)
+    .filter((value) => typeof value === "string")
     .sort();
   return timestamps[0];
 }
 
 function latestObservedAt(states) {
   const timestamps = states
-    .map((state) => typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : null)
-    .filter((value) => value !== null)
+    .map(stateTimestamp)
+    .filter((value) => typeof value === "string")
     .sort();
   return timestamps.at(-1);
 }
 
 function stateTimestamp(state) {
+  if (typeof state?.last_reported === "string" && !Number.isNaN(Date.parse(state.last_reported))) return state.last_reported;
   return typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : undefined;
 }
 

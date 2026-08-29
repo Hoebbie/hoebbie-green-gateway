@@ -691,8 +691,22 @@ async function runMusicStartOnce() {
 let polling = false;
 let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
-let nextProfileStatusAt = 0;
 let inventoryBurstUntil = 0;
+let profileStatusReporting = false;
+const PROFILE_STATUS_REFRESH_INTERVAL_MS = 15_000;
+
+async function refreshPersonalProfileStatus() {
+  if (profileStatusReporting) return;
+  profileStatusReporting = true;
+  try {
+    await runReadOnlyReporter(
+      reportPersonalProfileStatus,
+      (error) => console.error(error instanceof Error ? error.message : "Profilstatusfehler")
+    );
+  } finally {
+    profileStatusReporting = false;
+  }
+}
 
 const musicCommandDrain = new BoundedQueueDrain({
   claimOnce: runMusicOnce,
@@ -747,10 +761,6 @@ async function drainDeviceCommands() {
       () => musicDiscoveryReporter.request(),
       (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Inventarfehler")
     )) nextMusicInventoryAt = Date.now() + 60_000;
-    if (Date.now() >= nextProfileStatusAt && await runReadOnlyReporter(
-      reportPersonalProfileStatus,
-      (error) => console.error(error instanceof Error ? error.message : "Profilstatusfehler")
-    )) nextProfileStatusAt = Date.now() + 60_000;
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
@@ -885,6 +895,9 @@ setInterval(() => { void musicGroupCommandDrain.request(); }, GROUP_COMMAND_RECO
 // The broad pass remains a rare reconciliation for unrelated queues.
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();
+void refreshPersonalProfileStatus();
+const profileStatusRefresh = setInterval(() => { void refreshPersonalProfileStatus(); }, PROFILE_STATUS_REFRESH_INTERVAL_MS);
+profileStatusRefresh.unref?.();
 void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable")));
 const wasteCollectionRefresh = setInterval(() => { void reportWasteCollection().catch((error) => console.error(safeGatewayError(error, "gateway.waste_unavailable"))); }, 6 * 60 * 60_000);
 wasteCollectionRefresh.unref?.();
