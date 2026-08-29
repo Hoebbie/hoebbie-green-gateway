@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
+import { personalProfileStatusConfig, personalProfileStatusFromStates } from "./personal-profile-status.mjs";
 import { radioStreamMetadata } from "./radio-stream-metadata.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, GROUP_COMMAND_RECOVERY_INTERVAL_MS, withinDeadline } from "./queue-drain.mjs";
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
@@ -34,6 +35,13 @@ function gatewayKeyFromPersistentStorage() {
 
 const gatewayKey = gatewayKeyFromPersistentStorage();
 const gatewayKeyDigest = createHash("sha256").update(gatewayKey).digest("hex");
+const profileStatusConfig = (() => {
+  try { return personalProfileStatusConfig(process.env.PERSONAL_PROFILE_STATUS_ENTITIES_JSON ?? "{}"); }
+  catch {
+    console.error("gateway.profile_status_disabled:invalid_config");
+    return null;
+  }
+})();
 
 function persistedProfileQueueId() {
   if (!existsSync(profileQueuePath)) return null;
@@ -332,6 +340,22 @@ async function reportWasteCollection() {
   });
   if (!reported.ok) throw new Error("gateway.waste_report_failed");
   console.info(wasteCollectionSyncLog(collections.size));
+}
+
+async function reportPersonalProfileStatus() {
+  if (!profileStatusConfig) return;
+  const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
+  const states = await response.json().catch(() => null);
+  if (!response.ok || !Array.isArray(states)) throw new Error("gateway.profile_status_read_failed");
+  const appleStatus = personalProfileStatusFromStates(states, profileStatusConfig);
+  if (!appleStatus) throw new Error("gateway.profile_status_projection_failed");
+  const reported = await request(gatewayUrl, {
+    method: "POST",
+    headers: gatewayHeaders,
+    body: JSON.stringify({ appleStatus, mode: "profile_status", profileKey: profileStatusConfig.profileKey })
+  });
+  if (!reported.ok) throw new Error(await safeGatewayResponseFailure(reported, "gateway.profile_status_report_failed"));
+  console.info("gateway.profile_status_reported");
 }
 
 async function verifiedHomeState(expected) {
@@ -665,6 +689,7 @@ async function runMusicStartOnce() {
 let polling = false;
 let nextInventoryAt = 0;
 let nextMusicInventoryAt = 0;
+let nextProfileStatusAt = 0;
 let inventoryBurstUntil = 0;
 
 const musicCommandDrain = new BoundedQueueDrain({
@@ -719,6 +744,10 @@ async function drainDeviceCommands() {
     if (Date.now() >= nextMusicInventoryAt) {
       await musicDiscoveryReporter.request();
       nextMusicInventoryAt = Date.now() + 60_000;
+    }
+    if (Date.now() >= nextProfileStatusAt) {
+      await reportPersonalProfileStatus();
+      nextProfileStatusAt = Date.now() + 5 * 60_000;
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
