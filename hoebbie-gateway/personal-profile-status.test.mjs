@@ -51,6 +51,23 @@ test("projects only approved Companion values with independent source timestamps
   assert.equal(JSON.stringify(result).includes("Friedrich"), false);
 });
 
+test("prefers Home Assistant last_reported and falls back to last_updated", () => {
+  const config = personalProfileStatusConfig(configJson);
+  const result = personalProfileStatusFromStates([
+    { entity_id: "sensor.lars_iphone_battery_level", last_reported: "2026-08-29T12:03:00Z", last_updated: "2026-08-29T11:58:00Z", state: "74" },
+    { entity_id: "device_tracker.lars_iphone", last_updated: "2026-08-29T12:01:00Z", state: "home" }
+  ], config);
+  assert.deepEqual(result, {
+    battery_percent: 74,
+    observed_at: "2026-08-29T12:03:00Z",
+    observed_at_by_field: {
+      battery_percent: "2026-08-29T12:03:00Z",
+      zone_name: "2026-08-29T12:01:00Z"
+    },
+    zone_name: "Zuhause"
+  });
+});
+
 test("maps approved zones and omits unavailable sensor values", () => {
   const config = personalProfileStatusConfig(configJson);
   assert.deepEqual(personalProfileStatusFromStates([

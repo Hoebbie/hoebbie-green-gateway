@@ -11,3 +11,13 @@ test("copies every local gateway runtime import into the add-on image", async ()
     assert.match(dockerfile, new RegExp(`^COPY ${importedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} /app/${importedFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   }
 });
+
+test("refreshes the personal profile independently every 15 seconds", async () => {
+  const gateway = await readFile(new URL("./gateway.mjs", import.meta.url), "utf8");
+  assert.match(gateway, /const PROFILE_STATUS_REFRESH_INTERVAL_MS = 15_000;/);
+  assert.match(gateway, /void refreshPersonalProfileStatus\(\);/);
+  assert.match(
+    gateway,
+    /setInterval\(\(\) => \{ void refreshPersonalProfileStatus\(\); \}, PROFILE_STATUS_REFRESH_INTERVAL_MS\)/
+  );
+});
