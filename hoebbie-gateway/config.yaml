@@ -1,7 +1,7 @@
 name: Hoebbie Green Gateway
 slug: hoebbie_green_gateway
 description: Hoebbie-Geräteinventar und erlaubte Steuerung über einen ausgehenden Green-Gateway.
-version: "0.3.67"
+version: "0.3.68"
 url: https://github.com/Hoebbie/hoebbie-green-gateway
 arch:
   - aarch64
@@ -15,7 +15,9 @@ options:
   music_assistant_access_token: ""
   music_assistant_url: ""
   music_profile_providers_json: "{}"
+  personal_profile_status_entities_json: "{}"
 schema:
   music_assistant_access_token: "password?"
   music_assistant_url: "url?"
   music_profile_providers_json: "str?"
+  personal_profile_status_entities_json: "str?"

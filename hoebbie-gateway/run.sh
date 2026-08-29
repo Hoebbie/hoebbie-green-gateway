@@ -11,5 +11,6 @@ export HOEBBIE_GATEWAY_URL="https://rstobkrfiebbmolrglal.supabase.co/functions/v
 export MUSIC_ASSISTANT_URL="$(bashio::config 'music_assistant_url')"
 export MUSIC_ASSISTANT_ACCESS_TOKEN="$(bashio::config 'music_assistant_access_token')"
 export MUSIC_PROFILE_PROVIDERS_JSON="$(bashio::config 'music_profile_providers_json')"
+export PERSONAL_PROFILE_STATUS_ENTITIES_JSON="$(bashio::config 'personal_profile_status_entities_json')"
 
 exec node /app/gateway.mjs
