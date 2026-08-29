@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
-import { personalProfileStatusConfig, personalProfileStatusFromStates } from "./personal-profile-status.mjs";
+import { personalProfileStatusConfig, personalProfileStatusFromStates, vehicleStatusFromStates } from "./personal-profile-status.mjs";
 import { radioStreamMetadata } from "./radio-stream-metadata.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, GROUP_COMMAND_RECOVERY_INTERVAL_MS, withinDeadline } from "./queue-drain.mjs";
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
@@ -348,11 +348,12 @@ async function reportPersonalProfileStatus() {
   const states = await response.json().catch(() => null);
   if (!response.ok || !Array.isArray(states)) throw new Error("gateway.profile_status_read_failed");
   const appleStatus = personalProfileStatusFromStates(states, profileStatusConfig);
+  const vehicleStatus = vehicleStatusFromStates(states, profileStatusConfig);
   if (!appleStatus) throw new Error("gateway.profile_status_projection_failed");
   const reported = await request(gatewayUrl, {
     method: "POST",
     headers: gatewayHeaders,
-    body: JSON.stringify({ appleStatus, mode: "profile_status", profileKey: profileStatusConfig.profileKey })
+    body: JSON.stringify({ appleStatus, mode: "profile_status", profileKey: profileStatusConfig.profileKey, ...(vehicleStatus ? { vehicleStatus } : {}) })
   });
   if (!reported.ok) throw new Error(await safeGatewayResponseFailure(reported, "gateway.profile_status_report_failed"));
   console.info("gateway.profile_status_reported");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { personalProfileStatusConfig, personalProfileStatusFromStates } from "./personal-profile-status.mjs";
+import { personalProfileStatusConfig, personalProfileStatusFromStates, vehicleStatusFromStates } from "./personal-profile-status.mjs";
 
 const configJson = JSON.stringify({
   battery_level_entity_id: "sensor.lars_iphone_battery_level",
@@ -58,4 +58,61 @@ test("maps approved zones and omits unavailable sensor values", () => {
   assert.deepEqual(personalProfileStatusFromStates([
     { entity_id: "device_tracker.lars_iphone", state: "not_home" }
   ], config), { zone_name: "Unterwegs" });
+});
+
+test("projects an explicitly configured vehicle without credentials or coordinates", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      doors_open_entity_id: "binary_sensor.tiguan_doors_open",
+      fuel_percent_entity_id: "sensor.tiguan_fuel_level",
+      location_entity_id: "device_tracker.tiguan",
+      locked_entity_id: "lock.tiguan",
+      mileage_kilometers_entity_id: "sensor.tiguan_odometer",
+      range_kilometers_entity_id: "sensor.tiguan_range",
+      service_due_entity_id: "sensor.tiguan_service_due",
+      warning_count_entity_id: "sensor.tiguan_warnings",
+      windows_open_entity_id: "binary_sensor.tiguan_windows_open"
+    }
+  }));
+  const result = vehicleStatusFromStates([
+    { attributes: { unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", last_updated: "2026-08-29T14:00:00Z", state: "63" },
+    { attributes: { unit_of_measurement: "km" }, entity_id: "sensor.tiguan_range", last_updated: "2026-08-29T13:59:00Z", state: "510" },
+    { attributes: { unit_of_measurement: "km" }, entity_id: "sensor.tiguan_odometer", last_updated: "2026-08-29T13:58:00Z", state: "42123" },
+    { attributes: { latitude: 53.1, longitude: 10.2 }, entity_id: "device_tracker.tiguan", last_updated: "2026-08-29T13:57:00Z", state: "home" },
+    { entity_id: "lock.tiguan", last_updated: "2026-08-29T13:56:00Z", state: "locked" },
+    { entity_id: "binary_sensor.tiguan_doors_open", last_updated: "2026-08-29T13:55:00Z", state: "off" },
+    { entity_id: "binary_sensor.tiguan_windows_open", last_updated: "2026-08-29T13:54:00Z", state: "on" },
+    { entity_id: "sensor.tiguan_warnings", last_updated: "2026-08-29T13:53:00Z", state: "1" },
+    { entity_id: "sensor.tiguan_service_due", last_updated: "2026-08-29T13:52:00Z", state: "2027-02-18" }
+  ], config);
+  assert.deepEqual(result, {
+    doors_open: false,
+    fuel_percent: 63,
+    locked: true,
+    mileage_kilometers: 42123,
+    observed_at: "2026-08-29T13:52:00Z",
+    observed_at_by_field: {
+      doors_open: "2026-08-29T13:55:00Z",
+      fuel_percent: "2026-08-29T14:00:00Z",
+      locked: "2026-08-29T13:56:00Z",
+      mileage_kilometers: "2026-08-29T13:58:00Z",
+      range_kilometers: "2026-08-29T13:59:00Z",
+      service_due_at: "2026-08-29T13:52:00Z",
+      warning_count: "2026-08-29T13:53:00Z",
+      windows_open: "2026-08-29T13:54:00Z",
+      zone_name: "2026-08-29T13:57:00Z"
+    },
+    range_kilometers: 510,
+    service_due_at: "2027-02-18",
+    warning_count: 1,
+    windows_open: true,
+    zone_name: "Zuhause"
+  });
+  assert.equal(JSON.stringify(result).includes("latitude"), false);
+});
+
+test("rejects unknown or credential-shaped vehicle configuration", () => {
+  assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { username: "lars@example.test" } })), /profile_status_config_invalid/);
+  assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { fuel_percent_entity_id: "text.tiguan_password" } })), /profile_status_config_invalid/);
 });
