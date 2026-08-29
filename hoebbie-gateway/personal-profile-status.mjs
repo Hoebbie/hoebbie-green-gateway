@@ -90,6 +90,18 @@ function observedAt(states) {
   return timestamps[0];
 }
 
+function latestObservedAt(states) {
+  const timestamps = states
+    .map((state) => typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : null)
+    .filter((value) => value !== null)
+    .sort();
+  return timestamps.at(-1);
+}
+
+function stateTimestamp(state) {
+  return typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : undefined;
+}
+
 export function personalProfileStatusFromStates(states, config) {
   if (!Array.isArray(states) || !config) return null;
   const byId = new Map(states.filter((state) => state && typeof state.entity_id === "string").map((state) => [state.entity_id, state]));
@@ -102,12 +114,20 @@ export function personalProfileStatusFromStates(states, config) {
   const chargingState = typeof batteryState?.state === "string" ? batteryState.state.trim().toLocaleLowerCase("en-US") : "";
   const lowPowerMode = booleanAttribute(batteryState?.attributes?.["Low Power Mode"]);
   const zone = zoneName(location?.state);
-  const timestamp = observedAt([batteryLevel, batteryState, steps, location]);
+  const timestamp = latestObservedAt([batteryLevel, batteryState, steps, location]);
+  const observedAtByField = {
+    ...(batteryPercent === undefined || !stateTimestamp(batteryLevel) ? {} : { battery_percent: stateTimestamp(batteryLevel) }),
+    ...(!["charging", "full", "not charging"].includes(chargingState) || !stateTimestamp(batteryState) ? {} : { charging: stateTimestamp(batteryState) }),
+    ...(lowPowerMode === undefined || !stateTimestamp(batteryState) ? {} : { low_power_mode: stateTimestamp(batteryState) }),
+    ...(stepCount === undefined || !stateTimestamp(steps) ? {} : { steps: stateTimestamp(steps) }),
+    ...(zone === undefined || !stateTimestamp(location) ? {} : { zone_name: stateTimestamp(location) })
+  };
   return {
     ...(batteryPercent === undefined ? {} : { battery_percent: batteryPercent }),
     ...(!["charging", "full", "not charging"].includes(chargingState) ? {} : { charging: chargingState !== "not charging" }),
     ...(lowPowerMode === undefined ? {} : { low_power_mode: lowPowerMode }),
     ...(timestamp ? { observed_at: timestamp } : {}),
+    ...(Object.keys(observedAtByField).length ? { observed_at_by_field: observedAtByField } : {}),
     ...(stepCount === undefined ? {} : { steps: stepCount }),
     ...(zone ? { zone_name: zone } : {})
   };

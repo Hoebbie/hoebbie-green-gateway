@@ -23,7 +23,7 @@ test("requires an explicit, exact Lars Companion entity mapping", () => {
   });
 });
 
-test("projects only the approved Companion values and a conservative timestamp", () => {
+test("projects only approved Companion values with independent source timestamps", () => {
   const config = personalProfileStatusConfig(configJson);
   const result = personalProfileStatusFromStates([
     { entity_id: "sensor.lars_iphone_battery_level", last_updated: "2026-08-29T11:58:00Z", state: "74" },
@@ -36,7 +36,14 @@ test("projects only the approved Companion values and a conservative timestamp",
     battery_percent: 74,
     charging: true,
     low_power_mode: true,
-    observed_at: "2026-08-29T11:56:00Z",
+    observed_at: "2026-08-29T11:59:00Z",
+    observed_at_by_field: {
+      battery_percent: "2026-08-29T11:58:00Z",
+      charging: "2026-08-29T11:57:00Z",
+      low_power_mode: "2026-08-29T11:57:00Z",
+      steps: "2026-08-29T11:59:00Z",
+      zone_name: "2026-08-29T11:56:00Z"
+    },
     steps: 7842,
     zone_name: "Zuhause"
   });

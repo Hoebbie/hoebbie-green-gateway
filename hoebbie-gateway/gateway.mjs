@@ -750,7 +750,7 @@ async function drainDeviceCommands() {
     if (Date.now() >= nextProfileStatusAt && await runReadOnlyReporter(
       reportPersonalProfileStatus,
       (error) => console.error(error instanceof Error ? error.message : "Profilstatusfehler")
-    )) nextProfileStatusAt = Date.now() + 5 * 60_000;
+    )) nextProfileStatusAt = Date.now() + 60_000;
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
