@@ -103,6 +103,20 @@ function stateTimestamp(state) {
   return typeof state?.last_updated === "string" && !Number.isNaN(Date.parse(state.last_updated)) ? state.last_updated : undefined;
 }
 
+function vehicleStateTimestamp(state) {
+  const capturedAt = state?.attributes?.data_captured_at;
+  if (typeof capturedAt === "string" && !Number.isNaN(Date.parse(capturedAt))) return capturedAt;
+  return stateTimestamp(state);
+}
+
+function vehicleObservedAt(states) {
+  const timestamps = states
+    .map(vehicleStateTimestamp)
+    .filter((value) => typeof value === "string")
+    .sort();
+  return timestamps[0];
+}
+
 export function personalProfileStatusFromStates(states, config) {
   if (!Array.isArray(states) || !config) return null;
   const byId = new Map(states.filter((state) => state && typeof state.entity_id === "string").map((state) => [state.entity_id, state]));
@@ -187,12 +201,12 @@ export function vehicleStatusFromStates(states, config) {
     windows_open: source.windowsOpenEntityId
   };
   const observedAtByField = Object.fromEntries(Object.keys(values).flatMap((key) => {
-    const timestamp = fieldSources[key]?.last_updated;
+    const timestamp = vehicleStateTimestamp(fieldSources[key]);
     return typeof timestamp === "string" && !Number.isNaN(Date.parse(timestamp)) ? [[key, timestamp]] : [];
   }));
   return Object.keys(values).length === 0 ? null : {
     ...values,
     ...(Object.keys(observedAtByField).length ? { observed_at_by_field: observedAtByField } : {}),
-    ...(observedAt(Object.values(fieldSources)) ? { observed_at: observedAt(Object.values(fieldSources)) } : {})
+    ...(vehicleObservedAt(Object.values(fieldSources)) ? { observed_at: vehicleObservedAt(Object.values(fieldSources)) } : {})
   };
 }

@@ -100,8 +100,8 @@ test("projects an explicitly configured vehicle without credentials or coordinat
     }
   }));
   const result = vehicleStatusFromStates([
-    { attributes: { unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", last_updated: "2026-08-29T14:00:00Z", state: "63" },
-    { attributes: { unit_of_measurement: "km" }, entity_id: "sensor.tiguan_range", last_updated: "2026-08-29T13:59:00Z", state: "510" },
+    { attributes: { data_captured_at: "2026-08-29T13:51:00Z", unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", last_updated: "2026-08-29T14:00:00Z", state: "63" },
+    { attributes: { data_captured_at: "invalid", unit_of_measurement: "km" }, entity_id: "sensor.tiguan_range", last_updated: "2026-08-29T13:59:00Z", state: "510" },
     { attributes: { unit_of_measurement: "km" }, entity_id: "sensor.tiguan_odometer", last_updated: "2026-08-29T13:58:00Z", state: "42123" },
     { attributes: { latitude: 53.1, longitude: 10.2 }, entity_id: "device_tracker.tiguan", last_updated: "2026-08-29T13:57:00Z", state: "home" },
     { entity_id: "lock.tiguan", last_updated: "2026-08-29T13:56:00Z", state: "locked" },
@@ -115,10 +115,10 @@ test("projects an explicitly configured vehicle without credentials or coordinat
     fuel_percent: 63,
     locked: true,
     mileage_kilometers: 42123,
-    observed_at: "2026-08-29T13:52:00Z",
+    observed_at: "2026-08-29T13:51:00Z",
     observed_at_by_field: {
       doors_open: "2026-08-29T13:55:00Z",
-      fuel_percent: "2026-08-29T14:00:00Z",
+      fuel_percent: "2026-08-29T13:51:00Z",
       locked: "2026-08-29T13:56:00Z",
       mileage_kilometers: "2026-08-29T13:58:00Z",
       range_kilometers: "2026-08-29T13:59:00Z",
