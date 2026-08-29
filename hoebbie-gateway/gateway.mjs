@@ -3,6 +3,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
 import { personalProfileStatusConfig, personalProfileStatusFromStates, vehicleStatusFromStates } from "./personal-profile-status.mjs";
 import { radioStreamMetadata } from "./radio-stream-metadata.mjs";
+import { runReadOnlyReporter } from "./read-only-reporter.mjs";
 import { BoundedQueueDrain, CoalescedAsyncTask, GROUP_COMMAND_RECOVERY_INTERVAL_MS, withinDeadline } from "./queue-drain.mjs";
 import { reportGatewayCompletion, safeGatewayError, safeGatewayResponseFailure } from "./gateway-response.mjs";
 import { colorTemperature, currentBrightness, currentColorTemperature, currentRgbColor, lightTargetMatches, percentage, rgbColor } from "./routine-target.mjs";
@@ -738,18 +739,18 @@ async function drainDeviceCommands() {
       if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
       claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed);
     }
-    if (Date.now() >= nextInventoryAt) {
-      await reportInventory();
-      nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
-    }
-    if (Date.now() >= nextMusicInventoryAt) {
-      await musicDiscoveryReporter.request();
-      nextMusicInventoryAt = Date.now() + 60_000;
-    }
-    if (Date.now() >= nextProfileStatusAt) {
-      await reportPersonalProfileStatus();
-      nextProfileStatusAt = Date.now() + 5 * 60_000;
-    }
+    if (Date.now() >= nextInventoryAt && await runReadOnlyReporter(
+      reportInventory,
+      (error) => console.error(error instanceof Error ? error.message : "Green-Inventarfehler")
+    )) nextInventoryAt = Date.now() + (Date.now() < inventoryBurstUntil ? 500 : 60_000);
+    if (Date.now() >= nextMusicInventoryAt && await runReadOnlyReporter(
+      () => musicDiscoveryReporter.request(),
+      (error) => console.error(error instanceof Error ? error.message : "Music-Assistant-Inventarfehler")
+    )) nextMusicInventoryAt = Date.now() + 60_000;
+    if (Date.now() >= nextProfileStatusAt && await runReadOnlyReporter(
+      reportPersonalProfileStatus,
+      (error) => console.error(error instanceof Error ? error.message : "Profilstatusfehler")
+    )) nextProfileStatusAt = Date.now() + 5 * 60_000;
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
