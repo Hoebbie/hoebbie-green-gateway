@@ -141,6 +141,25 @@ test("rejects unknown or credential-shaped vehicle configuration", () => {
   assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { fuel_percent_entity_id: "text.tiguan_password" } })), /profile_status_config_invalid/);
   assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { doors_open_entity_ids: [] } })), /profile_status_config_invalid/);
   assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { doors_open_entity_id: "binary_sensor.tiguan_door", doors_open_entity_ids: ["binary_sensor.tiguan_door"] } })), /profile_status_config_invalid/);
+  assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { observed_at_entity_id: "binary_sensor.tiguan_snapshot" } })), /profile_status_config_invalid/);
+});
+
+test("uses the integration snapshot time for overall VW freshness without rewriting field capture times", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      fuel_percent_entity_id: "sensor.tiguan_fuel_level",
+      observed_at_entity_id: "sensor.tiguan_dataset_created"
+    }
+  }));
+  assert.deepEqual(vehicleStatusFromStates([
+    { attributes: { data_captured_at: "2026-08-30T15:32:21+00:00", unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", state: "99" },
+    { entity_id: "sensor.tiguan_dataset_created", state: "2026-08-30T17:43:48+00:00" }
+  ], config), {
+    fuel_percent: 99,
+    observed_at: "2026-08-30T17:43:48+00:00",
+    observed_at_by_field: { fuel_percent: "2026-08-30T15:32:21+00:00" }
+  });
 });
 
 test("aggregates the real VW Data Act door, window and lock semantics safely", () => {
