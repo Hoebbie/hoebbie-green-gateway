@@ -162,6 +162,37 @@ test("uses the integration snapshot time for overall VW freshness without rewrit
   });
 });
 
+test("discovers one unambiguous Data Act snapshot sensor when the optional mapping is absent", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      fuel_percent_entity_id: "sensor.tiguan_fuel_level"
+    }
+  }));
+  assert.deepEqual(vehicleStatusFromStates([
+    { attributes: { data_captured_at: "2026-08-30T15:32:21+00:00", unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", state: "99" },
+    { entity_id: "sensor.tiguan_elegance_datensatz_erzeugt", state: "2026-08-30T17:43:48+00:00" }
+  ], config), {
+    fuel_percent: 99,
+    observed_at: "2026-08-30T17:43:48+00:00",
+    observed_at_by_field: { fuel_percent: "2026-08-30T15:32:21+00:00" }
+  });
+});
+
+test("keeps the conservative field timestamp when snapshot discovery is ambiguous", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      fuel_percent_entity_id: "sensor.tiguan_fuel_level"
+    }
+  }));
+  assert.equal(vehicleStatusFromStates([
+    { attributes: { data_captured_at: "2026-08-30T15:32:21+00:00", unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", state: "99" },
+    { entity_id: "sensor.tiguan_elegance_datensatz_erzeugt", state: "2026-08-30T17:43:48+00:00" },
+    { entity_id: "sensor.golf_datensatz_erzeugt", state: "2026-08-30T17:44:00+00:00" }
+  ], config).observed_at, "2026-08-30T15:32:21+00:00");
+});
+
 test("aggregates the real VW Data Act door, window and lock semantics safely", () => {
   const config = personalProfileStatusConfig(JSON.stringify({
     ...JSON.parse(configJson),

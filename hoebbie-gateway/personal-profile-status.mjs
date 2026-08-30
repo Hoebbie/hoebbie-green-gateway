@@ -202,6 +202,16 @@ function dateTimeState(state) {
   return value && !Number.isNaN(Date.parse(value)) ? value : undefined;
 }
 
+function vehicleSnapshotState(states, configuredState) {
+  if (dateTimeState(configuredState)) return configuredState;
+  const candidates = states.filter((state) =>
+    typeof state?.entity_id === "string"
+    && /^sensor\.[a-z0-9_]+_datensatz_erzeugt$/.test(state.entity_id)
+    && dateTimeState(state)
+  );
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 function numericVehicleState(state, minimum, maximum, allowedUnits = null) {
   if (allowedUnits && !allowedUnits.includes(state?.attributes?.unit_of_measurement)) return undefined;
   return numericState(state, minimum, maximum);
@@ -220,7 +230,7 @@ export function vehicleStatusFromStates(states, config) {
   const windowsOpen = aggregateOpenState(source.windowsOpenEntityIds ?? []);
   const zone = zoneName(source.locationEntityId?.state);
   const serviceDue = serviceDueState(source.serviceDueEntityId);
-  const snapshotObservedAt = dateTimeState(source.observedAtEntityId);
+  const snapshotObservedAt = dateTimeState(vehicleSnapshotState(states, source.observedAtEntityId));
   const values = {
     ...(doorsOpen === undefined ? {} : { doors_open: doorsOpen }),
     ...(fuelPercent === undefined ? {} : { fuel_percent: fuelPercent }),
