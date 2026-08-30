@@ -17,6 +17,7 @@ const allowedVehicleKeys = new Set([
   "locked_entity_id",
   "locked_entity_ids",
   "mileage_kilometers_entity_id",
+  "observed_at_entity_id",
   "range_kilometers_entity_id",
   "service_due_entity_id",
   "warning_count_entity_id",
@@ -54,11 +55,12 @@ export function personalProfileStatusConfig(value) {
     locationEntityId: vehicleSource.location_entity_id,
     lockedEntityIds: optionalEntityIds(vehicleSource.locked_entity_id, vehicleSource.locked_entity_ids, vehicleEntityId),
     mileageKilometersEntityId: vehicleSource.mileage_kilometers_entity_id,
+    observedAtEntityId: vehicleSource.observed_at_entity_id,
     rangeKilometersEntityId: vehicleSource.range_kilometers_entity_id,
     serviceDueEntityId: vehicleSource.service_due_entity_id,
     warningCountEntityId: vehicleSource.warning_count_entity_id,
     windowsOpenEntityIds: optionalEntityIds(vehicleSource.windows_open_entity_id, vehicleSource.windows_open_entity_ids, vehicleEntityId)
-  }).filter(([, entityId]) => entityId !== undefined).map(([key, entityId]) => [key, Array.isArray(entityId) ? entityId : requiredEntityId(entityId, vehicleEntityId)])) : null;
+  }).filter(([, entityId]) => entityId !== undefined).map(([key, entityId]) => [key, Array.isArray(entityId) ? entityId : requiredEntityId(entityId, key === "observedAtEntityId" ? sensorEntityId : vehicleEntityId)])) : null;
   if (vehicle && (Object.keys(vehicle).length === 0 || Object.values(vehicle).some((item) => item === null))) throw new Error("gateway.profile_status_config_invalid");
   const config = {
     batteryLevelEntityId: requiredEntityId(parsed.battery_level_entity_id, sensorEntityId),
@@ -195,6 +197,11 @@ function serviceDueState(state) {
   return /^\d{4}-\d{2}-\d{2}(?:T[0-9:.+-]+Z?)?$/.test(value) && !Number.isNaN(Date.parse(value)) ? value : undefined;
 }
 
+function dateTimeState(state) {
+  const value = typeof state?.state === "string" ? state.state.trim() : "";
+  return value && !Number.isNaN(Date.parse(value)) ? value : undefined;
+}
+
 function numericVehicleState(state, minimum, maximum, allowedUnits = null) {
   if (allowedUnits && !allowedUnits.includes(state?.attributes?.unit_of_measurement)) return undefined;
   return numericState(state, minimum, maximum);
@@ -213,6 +220,7 @@ export function vehicleStatusFromStates(states, config) {
   const windowsOpen = aggregateOpenState(source.windowsOpenEntityIds ?? []);
   const zone = zoneName(source.locationEntityId?.state);
   const serviceDue = serviceDueState(source.serviceDueEntityId);
+  const snapshotObservedAt = dateTimeState(source.observedAtEntityId);
   const values = {
     ...(doorsOpen === undefined ? {} : { doors_open: doorsOpen }),
     ...(fuelPercent === undefined ? {} : { fuel_percent: fuelPercent }),
@@ -239,9 +247,10 @@ export function vehicleStatusFromStates(states, config) {
     const timestamp = vehicleObservedAt(fieldSources[key]);
     return typeof timestamp === "string" && !Number.isNaN(Date.parse(timestamp)) ? [[key, timestamp]] : [];
   }));
+  const overallObservedAt = snapshotObservedAt ?? vehicleObservedAt(Object.values(fieldSources).flat());
   return Object.keys(values).length === 0 ? null : {
     ...values,
     ...(Object.keys(observedAtByField).length ? { observed_at_by_field: observedAtByField } : {}),
-    ...(vehicleObservedAt(Object.values(fieldSources).flat()) ? { observed_at: vehicleObservedAt(Object.values(fieldSources).flat()) } : {})
+    ...(overallObservedAt ? { observed_at: overallObservedAt } : {})
   };
 }
