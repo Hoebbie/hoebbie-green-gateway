@@ -139,4 +139,75 @@ test("projects an explicitly configured vehicle without credentials or coordinat
 test("rejects unknown or credential-shaped vehicle configuration", () => {
   assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { username: "lars@example.test" } })), /profile_status_config_invalid/);
   assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { fuel_percent_entity_id: "text.tiguan_password" } })), /profile_status_config_invalid/);
+  assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { doors_open_entity_ids: [] } })), /profile_status_config_invalid/);
+  assert.throws(() => personalProfileStatusConfig(JSON.stringify({ ...JSON.parse(configJson), vehicle_entity_ids: { doors_open_entity_id: "binary_sensor.tiguan_door", doors_open_entity_ids: ["binary_sensor.tiguan_door"] } })), /profile_status_config_invalid/);
+});
+
+test("aggregates the real VW Data Act door, window and lock semantics safely", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      doors_open_entity_ids: ["binary_sensor.tiguan_door_left", "binary_sensor.tiguan_tailgate"],
+      fuel_percent_entity_id: "sensor.tiguan_fuel_level",
+      locked_entity_ids: ["binary_sensor.tiguan_lock_left", "binary_sensor.tiguan_lock_right"],
+      mileage_kilometers_entity_id: "sensor.tiguan_odometer",
+      range_kilometers_entity_id: "sensor.tiguan_range",
+      service_due_entity_id: "sensor.tiguan_service_due",
+      windows_open_entity_ids: ["binary_sensor.tiguan_window_left", "binary_sensor.tiguan_window_right"]
+    }
+  }));
+  const capturedAt = "2026-08-30T12:05:55+00:00";
+  const result = vehicleStatusFromStates([
+    { attributes: { data_captured_at: capturedAt, device_class: "door" }, entity_id: "binary_sensor.tiguan_door_left", state: "off" },
+    { attributes: { data_captured_at: capturedAt, device_class: "door" }, entity_id: "binary_sensor.tiguan_tailgate", state: "off" },
+    { attributes: { data_captured_at: capturedAt, device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_left", state: "on" },
+    { attributes: { data_captured_at: capturedAt, device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_right", state: "on" },
+    { attributes: { data_captured_at: capturedAt, device_class: "window" }, entity_id: "binary_sensor.tiguan_window_left", state: "off" },
+    { attributes: { data_captured_at: capturedAt, device_class: "window" }, entity_id: "binary_sensor.tiguan_window_right", state: "off" },
+    { attributes: { data_captured_at: capturedAt, unit_of_measurement: "%" }, entity_id: "sensor.tiguan_fuel_level", state: "100" },
+    { attributes: { data_captured_at: capturedAt, unit_of_measurement: "km" }, entity_id: "sensor.tiguan_range", state: "860" },
+    { attributes: { data_captured_at: capturedAt, unit_of_measurement: "km" }, entity_id: "sensor.tiguan_odometer", state: "26746" },
+    { entity_id: "sensor.tiguan_service_due", last_updated: "2026-08-30T14:56:42+00:00", state: "2027-01-09T23:00:00+00:00" }
+  ], config);
+  assert.deepEqual(result, {
+    doors_open: false,
+    fuel_percent: 100,
+    locked: false,
+    mileage_kilometers: 26746,
+    observed_at: capturedAt,
+    observed_at_by_field: {
+      doors_open: capturedAt,
+      fuel_percent: capturedAt,
+      locked: capturedAt,
+      mileage_kilometers: capturedAt,
+      range_kilometers: capturedAt,
+      service_due_at: "2026-08-30T14:56:42+00:00",
+      windows_open: capturedAt
+    },
+    range_kilometers: 860,
+    service_due_at: "2027-01-09T23:00:00+00:00",
+    windows_open: false
+  });
+});
+
+test("does not claim every opening is closed or locked while an aggregate member is unknown", () => {
+  const config = personalProfileStatusConfig(JSON.stringify({
+    ...JSON.parse(configJson),
+    vehicle_entity_ids: {
+      doors_open_entity_ids: ["binary_sensor.tiguan_door_left", "binary_sensor.tiguan_door_right"],
+      locked_entity_ids: ["binary_sensor.tiguan_lock_left", "binary_sensor.tiguan_lock_right"]
+    }
+  }));
+  assert.equal(vehicleStatusFromStates([
+    { attributes: { device_class: "door" }, entity_id: "binary_sensor.tiguan_door_left", state: "off" },
+    { attributes: { device_class: "door" }, entity_id: "binary_sensor.tiguan_door_right", state: "unknown" },
+    { attributes: { device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_left", state: "off" },
+    { attributes: { device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_right", state: "unknown" }
+  ], config), null);
+  assert.deepEqual(vehicleStatusFromStates([
+    { attributes: { device_class: "door" }, entity_id: "binary_sensor.tiguan_door_left", state: "on" },
+    { attributes: { device_class: "door" }, entity_id: "binary_sensor.tiguan_door_right", state: "unknown" },
+    { attributes: { device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_left", state: "on" },
+    { attributes: { device_class: "lock" }, entity_id: "binary_sensor.tiguan_lock_right", state: "unknown" }
+  ], config), { doors_open: true, locked: false });
 });
