@@ -41,16 +41,43 @@ export class PrintJournal {
     const dir = await open(this.directory, 'r'); try { await dir.sync(); } finally { await dir.close(); }
   }
 }
-export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = '/app/print/test-a4.pwg', prepareAsset, run = execute }) {
+function safePrintDiagnostic(value) {
+  if (!value || !['validation', 'connect', 'file', 'request', 'document', 'response', 'identity'].includes(value.phase)) return null;
+  const bounds = { httpStatus: [-1, 999], ippStatus: [-1, 65535], bytesAttempted: [0, 12000000], documentBytes: [0, 12000000], elapsedMs: [0, 120000] };
+  const safe = { phase: value.phase };
+  for (const [key, [min, max]] of Object.entries(bounds)) {
+    if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) return null;
+    safe[key] = value[key];
+  }
+  if (safe.bytesAttempted > safe.documentBytes) return null;
+  return safe;
+}
+export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = '/app/print/test-a4.pwg', prepareAsset, run = execute, log = () => {} }) {
   async function invoke(operation, name, arg) {
     // Never use a shell; only fixed operations, a validated local URI, UUID
     // job name and a fixed bundled file (or integer job ID) reach libcups.
     try {
       const { stdout } = await run(binary, [operation, uri, name, String(arg)], { timeout: 30_000, maxBuffer: 4096, env: { LANG: 'C', PATH: '/usr/bin:/bin' } });
       const value = JSON.parse(stdout);
-      if (!value || typeof value !== 'object' || value.error) throw new Error();
+      if (!value || typeof value !== 'object' || value.error) throw Object.assign(new Error(), { stdout });
       return value;
-    } catch { throw new Error('print.ipp_unconfirmed'); }
+    } catch (error) {
+      // Native stdout on failure, or the last flushed checkpoint if killed.
+      // Never log raw child output, paths, URIs or printer-supplied strings.
+      const sources = [error?.stdout, error?.stderr];
+      let diagnostic = null;
+      for (const source of sources) {
+        if (typeof source !== 'string' || source.length > 4096) continue;
+        for (const line of source.trim().split('\n').reverse()) {
+          try { diagnostic = safePrintDiagnostic(JSON.parse(line)?.diagnostic); } catch { /* untrusted output */ }
+          if (diagnostic) break;
+        }
+        if (diagnostic) break;
+      }
+      const reason = error?.killed === true ? 'process_terminated' : 'native_error';
+      try { log(`print.transport:${JSON.stringify({ operation, reason, ...(diagnostic ?? { phase: 'unavailable' }) })}`); } catch { /* diagnostics cannot alter delivery state */ }
+      throw new Error('print.ipp_unconfirmed');
+    }
   }
   return {
     target: createHash('sha256').update(uri).digest('hex'),

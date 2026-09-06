@@ -104,3 +104,23 @@ test('legacy test-page journal can never alias a coloring job', async t => {
  assert.equal((await f.adapter.run(command({asset:'lloyd-v1'}))).status,'unknown');
  assert.equal(f.calls.submit,0);assert.equal(f.calls.cancel,0);
 });
+
+test('native diagnostic is bounded and strips all unapproved fields',async()=>{
+ const {cupsClient}=await import('./print-adapter.mjs');const logs=[];
+ const diagnostic={phase:'response',httpStatus:200,ippStatus:1035,bytesAttempted:10,documentBytes:10,elapsedMs:12,uri:'SECRET',name:'PRIVATE'};
+ const client=cupsClient({uri:'ipp://192.168.1.5/ipp/print',log:s=>logs.push(s),run:async()=>{throw {stdout:JSON.stringify({error:'ipp_unconfirmed',diagnostic}),stderr:'SECRET'};}});
+ await assert.rejects(client.submit(`HOS-${id}`),/print.ipp_unconfirmed/);
+ assert.equal(logs.length,1);assert.ok(logs[0].includes('response'));assert.ok(!logs[0].includes('SECRET'));assert.ok(!logs[0].includes('PRIVATE'));
+});
+test('terminated process retains last valid checkpoint without logging raw stderr',async()=>{
+ const {cupsClient}=await import('./print-adapter.mjs');const logs=[];
+ const diagnostic={phase:'document',httpStatus:100,ippStatus:-1,bytesAttempted:0,documentBytes:100,elapsedMs:8};
+ const client=cupsClient({uri:'ipp://192.168.1.5/ipp/print',log:s=>logs.push(s),run:async()=>{throw {killed:true,stderr:JSON.stringify({diagnostic})+'\nprivate text'};}});
+ await assert.rejects(client.submit(`HOS-${id}`));assert.ok(logs[0].includes('process_terminated'));assert.ok(logs[0].includes('document'));assert.ok(!logs[0].includes('private text'));
+});
+test('invalid diagnostic and throwing logger cannot change terminal unknown or cause retry',async t=>{
+ const {cupsClient}=await import('./print-adapter.mjs');let count=0;
+ const client=cupsClient({uri:'ipp://192.168.1.5/ipp/print',log:()=>{throw new Error('logger');},run:async()=>{count++;throw {stdout:JSON.stringify({diagnostic:{phase:'http://secret'}})};}});
+ const f=await fixture(t,{submit:client.submit});
+ assert.equal((await f.adapter.run(command())).status,'unknown');assert.equal((await f.adapter.run(command())).status,'unknown');assert.equal(count,1);
+});

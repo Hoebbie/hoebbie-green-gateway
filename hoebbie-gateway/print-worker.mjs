@@ -6,7 +6,7 @@ export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, re
   if (!config) return { wake() {} };
   const url = new URL('./print-pilot', gatewayUrl).href;
   const prepareAsset = createPrintAssetCache({ requestAsset: asset => request(url, { method: 'POST', headers, redirect: 'error', body: JSON.stringify({ mode: 'asset', asset }) }) });
-  const adapter = suppliedAdapter ?? new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient({ ...config, prepareAsset }) });
+  const adapter = suppliedAdapter ?? new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient({ ...config, prepareAsset, log }) });
   let busy = false, timer = null, outstanding = false;
   async function wake() {
     if (busy) return;
