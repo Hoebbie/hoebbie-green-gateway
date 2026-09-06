@@ -1,10 +1,10 @@
 import { PrintAdapter, PrintJournal, cupsClient, printerConfig, validPrintCommand } from './print-adapter.mjs';
-export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, request, log = console.info, directory = '/data/print-journal' }) {
+export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, request, log = console.info, directory = '/data/print-journal', adapter: suppliedAdapter }) {
   let config;
   try { config = printerConfig(enabled, printerUri); } catch { log('print.disabled_invalid_config'); return { wake() {} }; }
   if (!config) return { wake() {} };
   const url = new URL('./print-pilot', gatewayUrl).href;
-  const adapter = new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient(config) });
+  const adapter = suppliedAdapter ?? new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient(config) });
   let busy = false, timer = null, outstanding = false;
   async function wake() {
     if (busy) return;
@@ -31,5 +31,5 @@ export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, re
       if (repeat) { timer = setTimeout(() => { void wake(); }, 15_000); timer.unref?.(); }
     }
   }
-  return { wake: () => { void wake(); } };
+  return { wake };
 }

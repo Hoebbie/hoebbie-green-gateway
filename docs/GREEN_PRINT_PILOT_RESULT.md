@@ -45,7 +45,7 @@ Journal, Gerätezielbindung und die konservative Behandlung unklarer Zustände.
 
 ## Prüfung
 
-Lokal bestanden: 136 Gateway-Tests einschließlich drei Tests gegen einen
+Lokal bestanden: 140 Gateway-Tests einschließlich drei Tests gegen einen
 lokalen IPP-HTTP-Simulator mit dem tatsächlich kompilierten CUPS-Helfer;
 vier Endpunkt-Schematests; Deno-Typecheck; Projekt-Lint, Typecheck, Tests,
 Web-Builds und Secret-Prüfung. Keine App-/UI-Änderung: neue Geräte-Screenshots,
@@ -55,7 +55,9 @@ Die neue pgTAP-Suite prüft Rechte, Haushaltsgrenzen, Idempotenz, Claims,
 Bestätigung, Status, Abbruch, Limit, deaktivierte Konfiguration und Widerruf.
 Vollständiger Supabase-Test und ARM64-Containerbau werden in GitHub geprüft,
 da lokal keine Docker-Laufzeit vorhanden ist. CI-Ergebnis und finale Commits
-werden im Task zurückgemeldet. Noch keine produktive Migration/Installation.
+werden im Task zurückgemeldet. Der erste ARM64-CI-Bau ist bestanden. Der neue CUPS-Helfer meldet den realen
+HP bei einer reinen Fähigkeitsabfrage als bereit; dabei wurde nichts gedruckt.
+Noch keine produktive Migration/Installation.
 
 ## Geplanter kontrollierter Rollout nach Freigabe
 

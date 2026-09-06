@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const exec=promisify(execFile);
 const binary=process.env.PRINT_TEST_BINARY ?? '/private/tmp/hoebbie-print-client';
@@ -26,7 +27,8 @@ async function simulator(t,handler){
 }
 async function run(s,op,arg){const {stdout}=await exec(binary,[op,s.uri,name,arg],{timeout:10000,env:{...process.env,HOEBBIE_PRINT_SIMULATOR:'1'}});return JSON.parse(stdout);}
 test('native CUPS sends one raster document and reads the exact named job',async t=>{
- const s=await simulator(t,b=>b.readUInt16BE(2)===2?[attr(0x21,'job-id',7),attr(0x23,'job-state',5)]:[attr(0x21,'job-id',7),attr(0x42,'job-name',name),attr(0x23,'job-state',9),attr(0x21,'job-media-sheets-completed',1)]);
+ const raster=await readFile(asset);
+ const s=await simulator(t,b=>{if(b.readUInt16BE(2)===2) assert.deepEqual(b.subarray(-raster.length),raster); return b.readUInt16BE(2)===2?[attr(0x21,'job-id',7),attr(0x23,'job-state',5)]:[attr(0x21,'job-id',7),attr(0x42,'job-name',name),attr(0x23,'job-state',9),attr(0x21,'job-media-sheets-completed',1)];});
  assert.equal((await run(s,'submit',asset)).jobId,7);assert.equal((await run(s,'status','7')).sheets,1);assert.deepEqual(s.requests,[2,9]);
 });
 test('native lost reply after receiving document does NOT replay Print-Job',async t=>{
