@@ -8,6 +8,7 @@ LABEL \
   io.hass.version="${BUILD_VERSION}"
 RUN apk add --no-cache curl nodejs
 COPY gateway.mjs /app/gateway.mjs
+COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs
 COPY personal-profile-status.mjs /app/personal-profile-status.mjs
