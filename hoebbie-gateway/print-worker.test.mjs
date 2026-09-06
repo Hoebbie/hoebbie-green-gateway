@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { createPrintWorker } from './print-worker.mjs';
 const id = '11111111-1111-4111-8111-111111111111';
 const command = { commandId: id, asset: 'test-a4-v1', maySubmit: true, cancelRequested: false, expiresAt: new Date(Date.now() + 600000).toISOString() };
@@ -38,4 +39,18 @@ test('overlapping wake signals cannot concurrently claim or print', async t => {
   const f = fixture(t, { request: async () => { claims++; await gate; return new Response(null, { status: 204 }); } });
   const first = f.worker.wake(); await f.worker.wake(); release(); await first;
   assert.equal(claims, 1); assert.equal(f.actions.length, 0);
+});
+
+test('lost terminal report followed by empty queue stops focused polling', async t => {
+  let requests = 0;
+  const f = fixture(t, { request: async () => {
+    requests++;
+    if (requests === 1) return Response.json(command);
+    if (requests === 2) throw new Error('response lost after server committed result');
+    return new Response(null, { status: 204 });
+  } });
+  await f.worker.wake();
+  t.mock.timers.tick(15000); await setImmediate();
+  t.mock.timers.tick(60000); await setImmediate();
+  assert.equal(requests, 3); assert.equal(f.actions.length, 1);
 });

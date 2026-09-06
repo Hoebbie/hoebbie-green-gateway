@@ -45,7 +45,7 @@ Journal, Gerätezielbindung und die konservative Behandlung unklarer Zustände.
 
 ## Prüfung
 
-Lokal bestanden: 140 Gateway-Tests einschließlich drei Tests gegen einen
+Lokal bestanden: 141 Gateway-Tests einschließlich drei Tests gegen einen
 lokalen IPP-HTTP-Simulator mit dem tatsächlich kompilierten CUPS-Helfer;
 vier Endpunkt-Schematests; Deno-Typecheck; Projekt-Lint, Typecheck, Tests,
 Web-Builds und Secret-Prüfung. Keine App-/UI-Änderung: neue Geräte-Screenshots,

@@ -19,9 +19,11 @@ export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, re
       if (!validPrintCommand(command)) throw new Error();
       repeat = true; outstanding = true;
       const result = await adapter.run(command);
+      // A lost terminal report may already be committed in the cloud.
+      // An empty subsequent claim must stop focused polling in that case.
+      outstanding = result.status === 'submitted';
       const reported = await request(url, { method: 'POST', headers, body: JSON.stringify({ mode: 'report', commandId: command.commandId, ...result }) });
       if (!reported.ok) throw new Error();
-      outstanding = result.status === 'submitted';
       log(`print.status:${result.status}`);
     } catch { log('print.worker_unavailable'); }
     finally {
