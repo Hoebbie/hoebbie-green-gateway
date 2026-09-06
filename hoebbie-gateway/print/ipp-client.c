@@ -17,6 +17,7 @@ static int contains(ipp_t *r,const char *key,ipp_tag_t tag,const char *value){
  return 0;
 }
 static int die(void){puts("{\"error\":\"ipp_unconfirmed\"}");return 1;}
+#include "asset-paths.h"
 int main(int argc,char **argv){
  if(argc!=5)return die();
  const char *op=argv[1],*uri=argv[2],*name=argv[3],*arg=argv[4];
@@ -33,8 +34,8 @@ int main(int argc,char **argv){
  ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"requesting-user-name",NULL,"HoebbieOS");
  FILE *file=NULL;struct stat st;size_t length=0;
  if(submit){
-  if(strcmp(arg,"/app/print/test-a4.pwg") && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
-  file=fopen(arg,"rb");if(!file||fstat(fileno(file),&st)||st.st_size<1800||st.st_size>2000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
+  if(!allowed_print_path(arg) && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
+  file=fopen(arg,"rb");if(!file||fstat(fileno(file),&st)||st.st_size<1800||st.st_size>12000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"job-name",NULL,name);
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_MIMETYPE,"document-format",NULL,"image/pwg-raster");
   ippAddBoolean(req,IPP_TAG_OPERATION,"ipp-attribute-fidelity",1);

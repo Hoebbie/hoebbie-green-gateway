@@ -88,3 +88,19 @@ test('concurrent delivery cannot enter the adapter twice',async t=>{
  let release;const gate=new Promise(r=>{release=r;});const f=await fixture(t,{check:async()=>{await gate;return {ready:true};}});
  const first=f.adapter.run(command());await assert.rejects(f.adapter.run(command()),/print.busy/);release();await first;assert.equal(f.calls.submit,1);
 });
+
+test('coloring job sends selected asset exactly once and survives restart', async t => {
+ let selected; const f=await fixture(t,{submit:async(_name,asset)=>{selected=asset;f.calls.submit++;return {jobId:7};}});
+ await f.adapter.run(command({asset:'lloyd-v1'}));
+ assert.equal(selected,'lloyd-v1');
+ const restarted=new PrintAdapter({journal:new PrintJournal(f.directory),client:f.client});
+ assert.equal((await restarted.run(command({asset:'lloyd-v1',maySubmit:false}))).status,'completed');
+ assert.equal(f.calls.submit,1);
+ assert.equal((await restarted.run(command({asset:'charizard-v1'}))).code,'job_identity_unknown');
+ assert.equal(f.calls.submit,1);
+});
+test('legacy test-page journal can never alias a coloring job', async t => {
+ const f=await fixture(t);await f.journal.put({id,target:'test-printer',status:'submitted',jobId:7});
+ assert.equal((await f.adapter.run(command({asset:'lloyd-v1'}))).status,'unknown');
+ assert.equal(f.calls.submit,0);assert.equal(f.calls.cancel,0);
+});

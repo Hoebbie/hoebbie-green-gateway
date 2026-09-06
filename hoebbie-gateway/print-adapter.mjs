@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { mkdir, readFile, open, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isIP } from 'node:net';
+import { COLORING_ASSETS } from './print-assets.mjs';
 const execute = promisify(execFile);
 export const TEST_ASSET_SHA256 = '01d602f27eca7b33701fb88c74e90b1d6fa726160f70515a65e9db83d78d905e';
 export const TEST_ASSET = 'test-a4-v1';
@@ -19,7 +20,7 @@ export function printerConfig(enabled, value) {
   return { uri: u.href };
 }
 export function validPrintCommand(c) {
-  return c && uuid.test(c.commandId) && c.asset === TEST_ASSET && typeof c.maySubmit === 'boolean' && typeof c.cancelRequested === 'boolean' && Number.isFinite(Date.parse(c.expiresAt));
+  return c && uuid.test(c.commandId) && (c.asset === TEST_ASSET || Object.hasOwn(COLORING_ASSETS, c.asset)) && typeof c.maySubmit === 'boolean' && typeof c.cancelRequested === 'boolean' && Number.isFinite(Date.parse(c.expiresAt));
 }
 export class PrintJournal {
   constructor(directory) { this.directory = directory; }
@@ -40,7 +41,7 @@ export class PrintJournal {
     const dir = await open(this.directory, 'r'); try { await dir.sync(); } finally { await dir.close(); }
   }
 }
-export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = '/app/print/test-a4.pwg', run = execute }) {
+export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = '/app/print/test-a4.pwg', prepareAsset, run = execute }) {
   async function invoke(operation, name, arg) {
     // Never use a shell; only fixed operations, a validated local URI, UUID
     // job name and a fixed bundled file (or integer job ID) reach libcups.
@@ -53,12 +54,15 @@ export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = 
   }
   return {
     target: createHash('sha256').update(uri).digest('hex'),
-    async verifyAsset() {
-      const bytes = await readFile(assetPath);
-      if (createHash('sha256').update(bytes).digest('hex') !== TEST_ASSET_SHA256) throw new Error('print.asset_invalid');
+    async verifyAsset(asset = TEST_ASSET) {
+      const selected = asset === TEST_ASSET ? { path: assetPath, sha256: TEST_ASSET_SHA256 } : COLORING_ASSETS[asset];
+      if (!selected) throw new Error('print.asset_invalid');
+      if (asset !== TEST_ASSET) { if (!prepareAsset) throw new Error('print.asset_unavailable'); await prepareAsset(asset); }
+      const bytes = await readFile(selected.path);
+      if (createHash('sha256').update(bytes).digest('hex') !== selected.sha256) throw new Error('print.asset_invalid');
     },
     check: name => invoke('check', name, '0'),
-    submit: name => invoke('submit', name, assetPath),
+    submit: (name, asset = TEST_ASSET) => invoke('submit', name, asset === TEST_ASSET ? assetPath : COLORING_ASSETS[asset].path),
     status: (name, id) => invoke('status', name, id),
     cancel: (name, id) => invoke('cancel', name, id)
   };
@@ -75,9 +79,11 @@ export class PrintAdapter {
   async process(c) {
     let entry = await this.journal.get(c.commandId);
     const save = async (status, code = null, extra = {}) => {
-      entry = { ...entry, id: c.commandId, target: this.client.target, status, code, ...extra };
+      entry = { ...entry, id: c.commandId, asset: c.asset, target: this.client.target, status, code, ...extra };
       await this.journal.put(entry); return { status, code, sheets: entry.sheets ?? null };
     };
+    // Legacy journals only ever contained the test page. Never alias a new motif.
+    if (entry && (entry.asset ?? TEST_ASSET) !== c.asset) return { status: 'unknown', code: 'job_identity_unknown', sheets: null };
     if (entry && terminal.has(entry.status)) return { status: entry.status, code: entry.code, sheets: entry.sheets ?? null };
     if (entry && entry.target !== this.client.target) return save('unknown', 'job_identity_unknown');
     if (entry?.status === 'submitting') return save('unknown', 'delivery_unknown');
@@ -86,13 +92,13 @@ export class PrintAdapter {
       if (!c.maySubmit) return save('unknown', 'delivery_unknown');
       if (c.cancelRequested) return save('cancelled');
       if (Date.parse(c.expiresAt) <= this.now()) return save('failed', 'expired');
-      try { await this.client.verifyAsset(); if ((await this.client.check(name)).ready !== true) return save('failed', 'printer_not_ready'); }
+      try { await this.client.verifyAsset(c.asset); if ((await this.client.check(name)).ready !== true) return save('failed', 'printer_not_ready'); }
       catch { return save('failed', 'preflight_failed'); }
       // Recheck expiry after network preflight, BEFORE durable dispatch intent.
       if (Date.parse(c.expiresAt) <= this.now()) return save('failed', 'expired');
       await save('submitting');
       let submitted;
-      try { submitted = await this.client.submit(name); }
+      try { submitted = await this.client.submit(name, c.asset); }
       catch { return save('unknown', 'delivery_unknown'); }
       if (!Number.isInteger(submitted.jobId) || submitted.jobId < 1) return save('unknown', 'delivery_unknown');
       // If this write fails, the previous submitting tombstone survives and
