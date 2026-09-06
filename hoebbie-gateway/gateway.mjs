@@ -1,3 +1,4 @@
+import { isLightGroup } from "./light-group.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MusicAssistantClient, MusicAssistantRealtime, validMusicAllRoomsCommand, validMusicCommand, validMusicGroupCommand, validMusicQueueTransferCommand, validMusicSeekCommand, validMusicShuffleCommand, validMusicSkipCommand, validMusicStartCommand, validMusicVolumeCommand } from "./music-assistant-client.mjs";
@@ -298,6 +299,7 @@ function discoveredEntity(state, areaNames) {
     capabilities.push("turn_on", "turn_off");
   }
   return {
+    isGroup: kind === "light" && isLightGroup(attributes),
     areaName: areaNames.get(state.entity_id) ?? null,
     brightness: currentBrightness(attributes),
     capabilities,
