@@ -6,7 +6,13 @@ LABEL \
   io.hass.arch="${BUILD_ARCH}" \
   io.hass.type="app" \
   io.hass.version="${BUILD_VERSION}"
-RUN apk add --no-cache curl nodejs
+RUN apk add --no-cache curl nodejs "cups-libs>=2.4.18"
+COPY print /app/print
+RUN apk add --no-cache --virtual .print-build build-base "cups-dev>=2.4.18" \
+    && cc -Wall -Wextra -Werror /app/print/ipp-client.c -lcups -o /app/print/ipp-client \
+    && apk del .print-build
+COPY print-adapter.mjs /app/print-adapter.mjs
+COPY print-worker.mjs /app/print-worker.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs

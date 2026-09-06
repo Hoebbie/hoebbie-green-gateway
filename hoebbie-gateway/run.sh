@@ -13,4 +13,7 @@ export MUSIC_ASSISTANT_ACCESS_TOKEN="$(bashio::config 'music_assistant_access_to
 export MUSIC_PROFILE_PROVIDERS_JSON="$(bashio::config 'music_profile_providers_json')"
 export PERSONAL_PROFILE_STATUS_ENTITIES_JSON="$(bashio::config 'personal_profile_status_entities_json')"
 
+export PRINT_PILOT_ENABLED="$(bashio::config 'print_pilot_enabled')"
+export PRINT_PILOT_PRINTER_URI="$(bashio::config 'print_pilot_printer_uri')"
+
 exec node /app/gateway.mjs

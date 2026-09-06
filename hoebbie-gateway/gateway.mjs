@@ -1,3 +1,4 @@
+import { createPrintWorker } from "./print-worker.mjs";
 import { isLightGroup } from "./light-group.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -771,7 +772,14 @@ async function drainDeviceCommands() {
   }
 }
 
+const printWorker = createPrintWorker({
+  enabled: process.env.PRINT_PILOT_ENABLED,
+  printerUri: process.env.PRINT_PILOT_PRINTER_URI,
+  gatewayUrl, headers: gatewayHeaders, request
+});
+
 function drainCommands() {
+  printWorker.wake();
   // Music has its own bounded worker. It must never wait behind a slow light,
   // routine or inventory request and cannot keep those queues locked either.
   void musicCommandDrain.request();
