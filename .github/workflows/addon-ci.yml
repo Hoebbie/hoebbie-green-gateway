@@ -16,4 +16,15 @@ jobs:
         with:
           node-version: 24.10.0
       - run: node --check hoebbie-gateway/gateway.mjs
+      - name: Build bounded CUPS client for simulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcups2-dev
+          cc -Wall -Wextra -Werror hoebbie-gateway/print/ipp-client.c -lcups -o /tmp/hoebbie-print-client
       - run: node --test hoebbie-gateway/*.test.mjs
+        env:
+          PRINT_TEST_BINARY: /tmp/hoebbie-print-client
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build actual Green ARM64 image (no publish)
+        run: docker buildx build --platform linux/arm64 --build-arg BUILD_ARCH=aarch64 --build-arg BUILD_VERSION=0.3.76 hoebbie-gateway
