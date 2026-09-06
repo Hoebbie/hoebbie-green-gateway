@@ -1,3 +1,9 @@
+## 0.3.78
+
+- Erweiterte private Ausmalbibliothek über leo-v2.
+- Feste native Motivliste und geprüfte SHA-256-Werte.
+- Bildcache auf 64 MB begrenzt; dauerhafte Drucknachweise bleiben erhalten.
+
 
 ## 0.3.77
 

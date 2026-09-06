@@ -23,3 +23,15 @@ test('invalid hash, oversized download, denied access and free paths cannot beco
 test('declared download size cannot bypass the streaming bound', async t => {
  const f=await fixture(t,async()=>new Response(Buffer.alloc(12000001),{headers:{'Content-Type':'image/pwg-raster','Content-Length':'10'}}));await assert.rejects(f.prepare('lloyd-v1'));
 });
+test('artwork cache is bounded and eviction never touches the print journal', async t => {
+ const directory=await mkdtemp(join(tmpdir(),'print-bounded-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const customAssets={'lloyd-v1':{sha256:digest},'charizard-v1':{sha256:digest}};
+ let requests=0;
+ const prepare=createPrintAssetCache({directory,assets:customAssets,maxCacheBytes:4096,requestAsset:async()=>{requests++;return new Response(bytes,{headers:{'Content-Type':'image/pwg-raster'}});}});
+ await writeFile(join(directory,'journal.json'),'keep');
+ await prepare('lloyd-v1');await prepare('charizard-v1');
+ await assert.rejects(readFile(join(directory,'lloyd-v1.pwg')));
+ assert.equal((await readFile(join(directory,'charizard-v1.pwg'))).length,4096);
+ assert.equal(await readFile(join(directory,'journal.json'),'utf8'),'keep');
+ await prepare('lloyd-v1');assert.equal(requests,3);
+});

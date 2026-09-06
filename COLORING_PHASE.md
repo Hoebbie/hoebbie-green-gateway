@@ -44,3 +44,13 @@ App/Backend-Details im separaten Hoebbie-OS-Repository unter
 und Endpoint veröffentlichen, Green aktualisieren, dann gesonderte
 `coloring_enabled`-Freigabe. Bei Rücknahme keine ungeklärten Aufträge löschen;
 Queue und Journal behalten. Keine neuen Hersteller-Zugangsdaten erforderlich.
+
+## Sammlungserweiterung vom 6. September 2026
+
+56 privat geprüfte Motive, Protokoll `leo-v2`, Version 0.3.78. Die feste
+Dateiliste wird auch im nativen CUPS-Client geprüft. Ausschließlich Code und
+Hashes im Green-Repository; die Bilddateien bleiben privat in Hoebbie OS und
+später im privaten Storage. Maximal 64 MB Rastercache, LRU-Verdrängung nur
+bekannter Bilddateien. Journaldateien mit Wiederholschutz bleiben erhalten.
+147 Gateway-Tests sowie privater nativer Transfer aller 56 Motive grün.
+Kein realer Druck, keine Installation und kein öffentlicher Push.

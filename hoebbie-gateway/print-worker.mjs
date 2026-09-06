@@ -14,7 +14,7 @@ export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, re
     busy = true;
     let repeat = false;
     try {
-      const response = await request(url, { method: 'POST', headers, body: JSON.stringify({ mode: 'claim', catalogVersion: 'leo-v1' }) });
+      const response = await request(url, { method: 'POST', headers, body: JSON.stringify({ mode: 'claim', catalogVersion: 'leo-v2' }) });
       if (response.status === 204) { repeat = outstanding; return; }
       if (!response.ok) throw new Error();
       const command = await response.json();
