@@ -33,8 +33,8 @@ int main(int argc,char **argv){
  ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"requesting-user-name",NULL,"HoebbieOS");
  FILE *file=NULL;struct stat st;size_t length=0;
  if(submit){
-  if(strcmp(arg,"/app/print/test-a4.pwg") && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
-  file=fopen(arg,"rb");if(!file||fstat(fileno(file),&st)||st.st_size<1800||st.st_size>2000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
+  if(strcmp(arg,"/app/print/test-a4.pwg") && strcmp(arg,"/data/print-assets/charizard-v1.pwg") && strcmp(arg,"/data/print-assets/lloyd-v1.pwg") && strcmp(arg,"/data/print-assets/ninjago-comic-v1.pwg") && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
+  file=fopen(arg,"rb");if(!file||fstat(fileno(file),&st)||st.st_size<1800||st.st_size>12000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"job-name",NULL,name);
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_MIMETYPE,"document-format",NULL,"image/pwg-raster");
   ippAddBoolean(req,IPP_TAG_OPERATION,"ipp-attribute-fidelity",1);

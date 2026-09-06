@@ -1,10 +1,12 @@
+import { createPrintAssetCache } from './print-asset-cache.mjs';
 import { PrintAdapter, PrintJournal, cupsClient, printerConfig, validPrintCommand } from './print-adapter.mjs';
 export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, request, log = console.info, directory = '/data/print-journal', adapter: suppliedAdapter }) {
   let config;
   try { config = printerConfig(enabled, printerUri); } catch { log('print.disabled_invalid_config'); return { wake() {} }; }
   if (!config) return { wake() {} };
   const url = new URL('./print-pilot', gatewayUrl).href;
-  const adapter = suppliedAdapter ?? new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient(config) });
+  const prepareAsset = createPrintAssetCache({ requestAsset: asset => request(url, { method: 'POST', headers, redirect: 'error', body: JSON.stringify({ mode: 'asset', asset }) }) });
+  const adapter = suppliedAdapter ?? new PrintAdapter({ journal: new PrintJournal(directory), client: cupsClient({ ...config, prepareAsset }) });
   let busy = false, timer = null, outstanding = false;
   async function wake() {
     if (busy) return;
@@ -12,7 +14,7 @@ export function createPrintWorker({ enabled, printerUri, gatewayUrl, headers, re
     busy = true;
     let repeat = false;
     try {
-      const response = await request(url, { method: 'POST', headers, body: JSON.stringify({ mode: 'claim' }) });
+      const response = await request(url, { method: 'POST', headers, body: JSON.stringify({ mode: 'claim', catalogVersion: 'leo-v1' }) });
       if (response.status === 204) { repeat = outstanding; return; }
       if (!response.ok) throw new Error();
       const command = await response.json();
