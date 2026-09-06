@@ -1,3 +1,9 @@
+## 0.3.79
+
+- Begrenzte lokale Druckdiagnose für Verbindung, Upload und Druckerantwort.
+- Nur feste Phasen und Zahlencodes; keine Adressen oder Dokumentnamen im Fehlerlog.
+- Unklare Druckaufträge bleiben gesperrt und werden nicht erneut gesendet.
+
 ## 0.3.78
 
 - Erweiterte private Ausmalbibliothek über leo-v2.
