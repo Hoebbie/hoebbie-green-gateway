@@ -7,6 +7,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 static int integer(ipp_t *r,const char *key,int fallback){
  ipp_attribute_t *a=ippFindAttribute(r,key,IPP_TAG_INTEGER);
@@ -50,7 +52,7 @@ int main(int argc,char **argv){
  if(submit){
   checkpoint("file");
   if(!allowed_print_path(arg) && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
-  file=fopen(arg,"rb");if(!file||fstat(fileno(file),&st)||st.st_size<1800||st.st_size>12000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
+  int fd=open(arg,O_RDONLY|O_NOFOLLOW);file=fd<0?NULL:fdopen(fd,"rb");if(fd>=0&&!file)close(fd);if(!file||fstat(fileno(file),&st)||!S_ISREG(st.st_mode)||st.st_size<1800||st.st_size>12000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"job-name",NULL,name);
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_MIMETYPE,"document-format",NULL,"image/pwg-raster");
   ippAddBoolean(req,IPP_TAG_OPERATION,"ipp-attribute-fidelity",1);
