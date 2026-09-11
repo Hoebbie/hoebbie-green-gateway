@@ -1,3 +1,4 @@
+import { isGeneratedAsset, validGeneratedMetadata } from './generated-print-asset.mjs';
 import { createHash } from 'node:crypto';
 import { mkdir, open, readFile, rename, stat, unlink, readdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -23,10 +24,12 @@ export function createPrintAssetCache({ requestAsset, directory = '/data/print-a
     if(total>maxCacheBytes) throw new Error('print.cache_full');
   }
   const matches = (bytes, digest) => createHash('sha256').update(bytes).digest('hex') === digest;
-  return async function prepareAsset(key) {
-    if (!Object.hasOwn(COLORING_ASSETS, key) || !Object.hasOwn(assets, key)) throw new Error('print.asset_invalid');
-    const path = join(directory, `${key}.pwg`), digest = assets[key].sha256;
-    try { const info = await stat(path); if (info.size <= maximum && matches(await readFile(path), digest)) { const now=new Date(); await utimes(path,now,now); await prune(path); return path; }
+  const prepareAsset = async function prepareAsset(key, metadata) {
+    const generated = isGeneratedAsset(key);
+    if (generated && (!validGeneratedMetadata(metadata) || Date.parse(metadata.expiresAt)<=Date.now())) throw new Error('print.asset_expired');
+    if (!generated && (!Object.hasOwn(COLORING_ASSETS, key) || !Object.hasOwn(assets, key))) throw new Error('print.asset_invalid');
+    const path = join(directory, `${key}.pwg`), digest = generated ? metadata.sha256 : assets[key].sha256;
+    if (!generated) try { const info = await stat(path); if (info.size <= maximum && matches(await readFile(path), digest)) { const now=new Date(); await utimes(path,now,now); await prune(path); return path; }
       await unlink(path); }
     catch (e) { if (e.code !== 'ENOENT') throw e; }
     // Fetch only this gateway's fixed print endpoint. No remote URL is accepted
@@ -39,12 +42,18 @@ export function createPrintAssetCache({ requestAsset, directory = '/data/print-a
       for (;;) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > maximum) { await reader.cancel(); throw new Error('print.asset_invalid'); } parts.push(value); }
     } finally { clearTimeout(timeout); reader.releaseLock(); }
     const bytes = Buffer.concat(parts);
-    if (bytes.length < 1800 || !matches(bytes, digest)) throw new Error('print.asset_invalid');
+    if (bytes.length < 1800 || !matches(bytes, digest) || (generated && (bytes.length !== metadata.bytes || Date.parse(metadata.expiresAt)<=Date.now()))) throw new Error('print.asset_invalid');
     await prune(path,bytes.length);
-    const tmp = `${path}.tmp`; const file = await open(tmp, 'w', 0o600);
+    const tmp = `${path}.tmp`; const file = await open(tmp, generated ? 'wx' : 'w', 0o600);
     try { await file.writeFile(bytes); await file.sync(); } finally { await file.close(); }
     try { await rename(tmp, path); } catch (e) { await unlink(tmp).catch(() => {}); throw e; }
     const dir = await open(directory, 'r'); try { await dir.sync(); } finally { await dir.close(); }
     return path;
   };
+  prepareAsset.release = async key => { if (isGeneratedAsset(key)) await unlink(join(directory,key+'.pwg')).catch(e=>{if(e.code!=='ENOENT')throw e;}); };
+  prepareAsset.pruneGenerated = async () => {
+    let names;try { names=await readdir(directory); } catch(e) { if(e.code==='ENOENT')return;throw e; }
+    for(const name of names) if(/\.pwg(?:\.tmp)?$/.test(name) && isGeneratedAsset(name.replace(/\.pwg(?:\.tmp)?$/,''))) await unlink(join(directory,name));
+  };
+  return prepareAsset;
 }

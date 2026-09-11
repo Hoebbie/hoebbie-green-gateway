@@ -11,6 +11,7 @@ COPY print /app/print
 RUN apk add --no-cache --virtual .print-build build-base "cups-dev>=2.4.18" \
     && cc -Wall -Wextra -Werror /app/print/ipp-client.c -lcups -o /app/print/ipp-client \
     && apk del .print-build
+COPY generated-print-asset.mjs /app/generated-print-asset.mjs
 COPY print-asset-cache.mjs /app/print-asset-cache.mjs
 COPY print-assets.mjs /app/print-assets.mjs
 COPY print-adapter.mjs /app/print-adapter.mjs

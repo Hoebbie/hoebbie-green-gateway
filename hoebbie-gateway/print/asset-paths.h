@@ -1,5 +1,15 @@
 // Generated approved cache paths; never accept a command-provided path.
 static int allowed_print_path(const char *path) {
+ const char *prefix="/data/print-assets/alfred-";
+ if(!strncmp(path,prefix,strlen(prefix))) {
+  const char *id=path+strlen(prefix);
+  if(strlen(id)!=43 || strcmp(id+36,"-v1.pwg")) return 0;
+  for(size_t i=0;i<36;i++) {
+   if(i==8||i==13||i==18||i==23) { if(id[i]!='-') return 0; }
+   else if(!((id[i]>='0'&&id[i]<='9')||(id[i]>='a'&&id[i]<='f'))) return 0;
+  }
+  return 1;
+ }
  const char *paths[] = {"/app/print/test-a4.pwg",
   "/data/print-assets/charizard-v1.pwg",
   "/data/print-assets/lloyd-v1.pwg",

@@ -1,3 +1,4 @@
+import { isGeneratedAsset, validGeneratedMetadata } from './generated-print-asset.mjs';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -20,7 +21,7 @@ export function printerConfig(enabled, value) {
   return { uri: u.href };
 }
 export function validPrintCommand(c) {
-  return c && uuid.test(c.commandId) && (c.asset === TEST_ASSET || Object.hasOwn(COLORING_ASSETS, c.asset)) && typeof c.maySubmit === 'boolean' && typeof c.cancelRequested === 'boolean' && Number.isFinite(Date.parse(c.expiresAt));
+  return c && uuid.test(c.commandId) && (c.asset === TEST_ASSET || Object.hasOwn(COLORING_ASSETS, c.asset) || (isGeneratedAsset(c.asset) && validGeneratedMetadata(c.assetMetadata))) && typeof c.maySubmit === 'boolean' && typeof c.cancelRequested === 'boolean' && Number.isFinite(Date.parse(c.expiresAt));
 }
 export class PrintJournal {
   constructor(directory) { this.directory = directory; }
@@ -79,9 +80,16 @@ export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = 
       throw new Error('print.ipp_unconfirmed');
     }
   }
+  const generated = new Map();
   return {
     target: createHash('sha256').update(uri).digest('hex'),
-    async verifyAsset(asset = TEST_ASSET) {
+    async verifyAsset(asset = TEST_ASSET, metadata) {
+      if (isGeneratedAsset(asset)) {
+        if (!validGeneratedMetadata(metadata) || Date.parse(metadata.expiresAt)<=Date.now() || !prepareAsset) throw new Error('print.asset_invalid');
+        const path=await prepareAsset(asset,metadata);const bytes=await readFile(path);
+        if(bytes.length!==metadata.bytes || createHash('sha256').update(bytes).digest('hex')!==metadata.sha256) throw new Error('print.asset_invalid');
+        generated.set(asset,{path,expiresAt:metadata.expiresAt});return;
+      }
       const selected = asset === TEST_ASSET ? { path: assetPath, sha256: TEST_ASSET_SHA256 } : COLORING_ASSETS[asset];
       if (!selected) throw new Error('print.asset_invalid');
       if (asset !== TEST_ASSET) { if (!prepareAsset) throw new Error('print.asset_unavailable'); await prepareAsset(asset); }
@@ -89,7 +97,14 @@ export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = 
       if (createHash('sha256').update(bytes).digest('hex') !== selected.sha256) throw new Error('print.asset_invalid');
     },
     check: name => invoke('check', name, '0'),
-    submit: (name, asset = TEST_ASSET) => invoke('submit', name, asset === TEST_ASSET ? assetPath : COLORING_ASSETS[asset].path),
+    submit: (name, asset = TEST_ASSET) => {
+      if(isGeneratedAsset(asset)) {
+        const file=generated.get(asset);if(!file || Date.parse(file.expiresAt)<=Date.now()) throw new Error('print.asset_expired');
+        return invoke('submit',name,file.path);
+      }
+      return invoke('submit',name,asset === TEST_ASSET ? assetPath : COLORING_ASSETS[asset].path);
+    },
+    releaseAsset: async asset => { generated.delete(asset);await prepareAsset?.release?.(asset); },
     status: (name, id) => invoke('status', name, id),
     cancel: (name, id) => invoke('cancel', name, id)
   };
@@ -101,7 +116,7 @@ export class PrintAdapter {
     if (!validPrintCommand(command)) throw new Error('print.invalid_command');
     if (this.#active) throw new Error('print.busy');
     this.#active = true;
-    try { return await this.process(command); } finally { this.#active = false; }
+    try { return await this.process(command); } finally { try { await this.client.releaseAsset?.(command.asset); } finally { this.#active = false; } }
   }
   async process(c) {
     let entry = await this.journal.get(c.commandId);
@@ -119,7 +134,7 @@ export class PrintAdapter {
       if (!c.maySubmit) return save('unknown', 'delivery_unknown');
       if (c.cancelRequested) return save('cancelled');
       if (Date.parse(c.expiresAt) <= this.now()) return save('failed', 'expired');
-      try { await this.client.verifyAsset(c.asset); if ((await this.client.check(name)).ready !== true) return save('failed', 'printer_not_ready'); }
+      try { await this.client.verifyAsset(c.asset,c.assetMetadata); if ((await this.client.check(name)).ready !== true) return save('failed', 'printer_not_ready'); }
       catch { return save('failed', 'preflight_failed'); }
       // Recheck expiry after network preflight, BEFORE durable dispatch intent.
       if (Date.parse(c.expiresAt) <= this.now()) return save('failed', 'expired');
