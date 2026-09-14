@@ -1,0 +1,19 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+export HOME_ASSISTANT_URL="http://supervisor/core"
+export HOME_ASSISTANT_ACCESS_TOKEN="${SUPERVISOR_TOKEN:?SUPERVISOR_TOKEN ist nicht verfügbar.}"
+export HOEBBIE_GATEWAY_URL="https://rstobkrfiebbmolrglal.supabase.co/functions/v1/home-assistant-pilot"
+
+# Music Assistant stays opt-in until the separate discovery release is enabled.
+# The Supervisor stores the password-valued option redacted for unprivileged
+# callers; it is never printed by this script or the gateway.
+export MUSIC_ASSISTANT_URL="$(bashio::config 'music_assistant_url')"
+export MUSIC_ASSISTANT_ACCESS_TOKEN="$(bashio::config 'music_assistant_access_token')"
+export MUSIC_PROFILE_PROVIDERS_JSON="$(bashio::config 'music_profile_providers_json')"
+export PERSONAL_PROFILE_STATUS_ENTITIES_JSON="$(bashio::config 'personal_profile_status_entities_json')"
+
+export PRINT_PILOT_ENABLED="$(bashio::config 'print_pilot_enabled')"
+export PRINT_PILOT_PRINTER_URI="$(bashio::config 'print_pilot_printer_uri')"
+
+exec node /app/gateway.mjs
