@@ -16,6 +16,7 @@ COPY print-asset-cache.mjs /app/print-asset-cache.mjs
 COPY print-assets.mjs /app/print-assets.mjs
 COPY print-adapter.mjs /app/print-adapter.mjs
 COPY print-worker.mjs /app/print-worker.mjs
+COPY vacuum-adapter.mjs /app/vacuum-adapter.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs

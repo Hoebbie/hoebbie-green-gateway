@@ -1,11 +1,11 @@
 {
   "README.md": "29e816ef8e06d93ccfbc9351e255add37791834874198b920affc29be036fcf7",
-  "hoebbie-gateway/CHANGELOG.md": "ea6e305f01fcbca535285ec231ca607d39cfd8a7c12fa02b11b74b1abd17cb29",
-  "hoebbie-gateway/Dockerfile": "3cb0c70891613b36291f64e1d34962f4f7b0bb1cbf75e6aa2b160522f6ac6046",
+  "hoebbie-gateway/CHANGELOG.md": "9e2e77ec1fe6c224430f74f768c4007f4dd61336bb0d45f46c4ebb03d4027ce4",
+  "hoebbie-gateway/Dockerfile": "b616233ff429aa15070e1f2cf6ebf1148ed2e6f6aeb9dac4097b575f9713ba9c",
   "hoebbie-gateway/build.yaml": "47a22aece8b65dae3baa8442a05ee0065f74e61de1dee40c2917ebb425511f70",
-  "hoebbie-gateway/config.yaml": "d3d2ee426be6d06e777bde89ee9bd21713540be70dab8e995e37127544157a6b",
+  "hoebbie-gateway/config.yaml": "979a27fb01f80aa4ad08eb04a89f54d3d0ea5d7e826af4033e4631e577a3249e",
   "hoebbie-gateway/gateway-response.mjs": "62c6be9dd9dfe634e3775f375eac818bc62fad2b57451a73f7aa6df2a24d6255",
-  "hoebbie-gateway/gateway.mjs": "64fac801d325d471726690eeaaf9e98201cb14a9f63ae410ee5bc54e9945b252",
+  "hoebbie-gateway/gateway.mjs": "55fba2d53a0fe08d97f0d6770a27f190535d0a83f1f93b362c1275e4cb3ac237",
   "hoebbie-gateway/generated-print-asset.mjs": "ca1a295654ab29617cb1c8ca742f6a6eb82df2a708560b004f9e81e0395f9441",
   "hoebbie-gateway/light-group.mjs": "6f71952a25f68508ec35daad81c36269193a6416c1175a858a72a790b68d7ecf",
   "hoebbie-gateway/music-assistant-client.mjs": "6830a97270e7ff58e7c970f5c4aa9df555f3151e9d94ec4c31d18a808a314be7",
@@ -23,6 +23,7 @@
   "hoebbie-gateway/realtime-protocol.mjs": "d9925a06ac960c9729c9389fa2de52a41ff8264f0c019a5687d1f11fd7e3a3a7",
   "hoebbie-gateway/routine-target.mjs": "c11820e61db4ec135c2b4bb3a1ab6f6b327a12d9a4a819a3fddd4a72484c0611",
   "hoebbie-gateway/run.sh": "4dce800c3b729a080e33970600de18bcb2ceb6f1190930c0d49e65392292b447",
+  "hoebbie-gateway/vacuum-adapter.mjs": "b91ad976c9f4a99edb385db236c28bece6a2381108cb8eeef06919b9e5bc04de",
   "hoebbie-gateway/waste-collection.mjs": "00c70d8923da4d3c4415e1bb5230c06d4f35c021d16932d078c21d1bd7432044",
   "repository.yaml": "f8f44e4c1a374c30fa3ad71bcde0e35af969933a5aa14cedc566621f9f8660aa"
 }

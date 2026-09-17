@@ -1,3 +1,4 @@
+import { createVacuumWorker } from './vacuum-adapter.mjs';
 import { createPrintWorker } from "./print-worker.mjs";
 import { isLightGroup } from "./light-group.mjs";
 import { createHash, randomBytes } from "node:crypto";
@@ -323,6 +324,7 @@ async function reportInventory() {
   const entities = states.map((state) => discoveredEntity(state, areaNames)).filter((entity) => entity !== null);
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ entities, mode: "inventory" }) });
   if (!reported.ok) throw new Error("gateway.inventory_report_failed");
+  await vacuumWorker.report().catch(() => console.error("vacuum.inventory_unavailable"));
 }
 
 async function reportWasteCollection() {
@@ -772,6 +774,8 @@ async function drainDeviceCommands() {
   }
 }
 
+const vacuumWorker = createVacuumWorker({gatewayUrl,gatewayHeaders,homeAssistantUrl,homeHeaders,request});
+
 const printWorker = createPrintWorker({
   enabled: process.env.PRINT_PILOT_ENABLED,
   printerUri: process.env.PRINT_PILOT_PRINTER_URI,
@@ -779,6 +783,7 @@ const printWorker = createPrintWorker({
 });
 
 function drainCommands() {
+  void vacuumWorker.wake();
   printWorker.wake();
   // Music has its own bounded worker. It must never wait behind a slow light,
   // routine or inventory request and cannot keep those queues locked either.
@@ -905,6 +910,9 @@ setInterval(() => { void musicGroupCommandDrain.request(); }, GROUP_COMMAND_RECO
 // The broad pass remains a rare reconciliation for unrelated queues.
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();
+// Match the Xiaomi Miot provider's 60-second state cadence. No device actions.
+const vacuumRefresh = setInterval(() => { void vacuumWorker.report().catch(() => console.error("vacuum.inventory_unavailable")); }, 60_000);
+vacuumRefresh.unref?.();
 void refreshPersonalProfileStatus();
 const profileStatusRefresh = setInterval(() => { void refreshPersonalProfileStatus(); }, PROFILE_STATUS_REFRESH_INTERVAL_MS);
 profileStatusRefresh.unref?.();
