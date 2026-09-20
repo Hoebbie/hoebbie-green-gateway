@@ -159,7 +159,20 @@ function selectedMediaItem(value, kind) {
   if (!name || !uri || !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri)) return null;
   const artist = kind === "album" || kind === "track" ? mediaLabel(value.artists?.[0]?.name ?? value.artist?.name ?? value.artist) : null;
   const releaseYear = kind === "album" && Number.isInteger(value.year) && value.year >= 1800 && value.year <= 2200 ? value.year : undefined;
-  return { artist, kind, name, ...(releaseYear === undefined ? {} : { releaseYear }), uri };
+  const images = [...(Array.isArray(value.metadata?.images) ? value.metadata.images : []), ...(Array.isArray(value.album?.metadata?.images) ? value.album.metadata.images : [])];
+  const artworkRef = images.filter((image) => image?.type === "thumb").map((image) => catalogArtworkRef(image.path)).find(Boolean);
+  const owner = kind === "playlist" ? mediaLabel(value.owner) : null;
+  const album = kind === "track" ? mediaLabel(value.album?.name) : null;
+  const durationSeconds = kind === "track" && Number.isInteger(value.duration) && value.duration > 0 && value.duration <= 86400 ? value.duration : null;
+  return { artist, kind, name, ...(releaseYear === undefined ? {} : { releaseYear }),
+    ...(artworkRef ? { artworkRef } : {}), ...(owner ? { owner } : {}),
+    ...(album ? { album } : {}), ...(durationSeconds ? { durationSeconds } : {}), uri };
+}
+
+// Only public Spotify artwork. Never expose authenticated MA URLs or local paths.
+export function catalogArtworkRef(value) {
+  if (typeof value !== "string" || value.length > 500) return null;
+  return /^https:\/\/(?:i\.scdn\.co\/image\/[A-Za-z0-9]{20,100}|image-cdn-(?:ak|fa)\.spotifycdn\.com\/image\/[A-Za-z0-9]{20,150}|mosaic\.scdn\.co\/[0-9]{2,4}\/[A-Za-z0-9]{20,200}[A-Za-z0-9]{0,200})$/.test(value) ? value : null;
 }
 
 function belongsToProvider(value, providerInstanceId) {
@@ -346,6 +359,19 @@ export class MusicAssistantClient {
     const rows = response.payload?.tracks ?? response.payload?.result?.tracks;
     if (!response.ok || !Array.isArray(rows)) throw new MusicAssistantGatewayError("music_assistant.search_unavailable", "Music Assistant konnte keine Titel suchen.");
     return rows.filter((item) => belongsToProvider(item, provider)).slice(0, 20).map((item) => selectedMediaItem(item, "track")).filter(Boolean);
+  }
+
+  /** One provider-scoped query returns actual tracks, albums and public playlist
+   * search results. It never falls back to another household profile. */
+  async searchDiscovery(query, providerInstanceId) {
+    const searchQuery = mediaLabel(query, 100);
+    const provider = playerId(providerInstanceId);
+    if (!provider || !searchQuery || searchQuery.length < 3) throw new MusicAssistantGatewayError("music_assistant.search_invalid", "Die Musiksuche ist ungültig.");
+    const response = await this.command("music/search", { limit: 12, media_types: ["track", "album", "playlist"], providers: [provider], search_query: searchQuery });
+    const result = response.payload?.result ?? response.payload;
+    if (!response.ok || !result || !["tracks", "albums", "playlists"].every((key) => Array.isArray(result[key]))) throw new MusicAssistantGatewayError("music_assistant.search_unavailable", "Music Assistant konnte die Musik nicht suchen.");
+    return [["tracks", "track"], ["albums", "album"], ["playlists", "playlist"]].flatMap(([key, kind]) =>
+      result[key].filter((item) => belongsToProvider(item, provider)).slice(0, 12).map((item) => selectedMediaItem(item, kind)).filter(Boolean));
   }
 
   /** Reads a bounded album catalog only. The exact fixed Music Assistant

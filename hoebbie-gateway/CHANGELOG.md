@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.82
+
+- Musiksuche mit Songs, Alben und öffentlichen Spotify-Playlists.
+- Cover und Metadaten für die visuelle Ergebnisansicht.
+
 ## 0.3.81
 
 Add capability-validated vacuum controls, state reporting and maintenance data.
