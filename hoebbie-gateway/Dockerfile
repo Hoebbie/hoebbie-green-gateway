@@ -19,6 +19,7 @@ COPY print-worker.mjs /app/print-worker.mjs
 COPY vacuum-adapter.mjs /app/vacuum-adapter.mjs
 COPY edge-observability.mjs /app/edge-observability.mjs
 COPY profile-status-report-policy.mjs /app/profile-status-report-policy.mjs
+COPY group-recovery-probe.mjs /app/group-recovery-probe.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs

@@ -1,3 +1,4 @@
+import { GroupRecoveryProbe } from "./group-recovery-probe.mjs";
 import { createEdgeObservedFetch } from "./edge-observability.mjs";
 import { createProfileStatusReportPolicy } from "./profile-status-report-policy.mjs";
 import { createVacuumWorker } from './vacuum-adapter.mjs';
@@ -838,6 +839,7 @@ async function realtimeSession() {
   return session;
 }
 
+let recoverySession = null;
 let realtimeSocket = null;
 let reconnectTimer = null;
 let refreshTimer = null;
@@ -868,6 +870,7 @@ async function connectRealtime() {
   clearRealtimeTimers();
   try {
     const session = await realtimeSession();
+    recoverySession = session;
     const topic = realtimeTopic(session.gatewayId);
     const socket = new WebSocket(realtimeSocketUrl(session));
     socket.binaryType = "arraybuffer";
@@ -936,7 +939,15 @@ async function connectRealtime() {
 // Supabase Broadcast remains the low-latency wake-up. This focused recovery
 // pass protects the durable 90-second group queue without increasing polling
 // for unrelated workers.
-setInterval(() => { void musicGroupCommandDrain.request(); }, GROUP_COMMAND_RECOVERY_INTERVAL_MS);
+const groupRecoveryProbe = new GroupRecoveryProbe({
+  getSession: () => recoverySession,
+  claim: () => musicGroupCommandDrain.request()
+});
+setInterval(() => { void groupRecoveryProbe.request().catch(() => console.error("gateway.group_recovery_failed")); }, GROUP_COMMAND_RECOVERY_INTERVAL_MS);
+setInterval(() => {
+  const counts = groupRecoveryProbe.takeCounts();
+  if (counts.checks) console.info(JSON.stringify({ event: "group_recovery_summary", source: "green", windowSeconds: 300, ...counts }));
+}, 5 * 60_000);
 // The broad pass remains a rare reconciliation for unrelated queues.
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();

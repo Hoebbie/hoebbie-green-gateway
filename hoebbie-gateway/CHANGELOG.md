@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.84
+
+- Avoid empty music-group Edge recovery calls with an authenticated read-only hint.
+- Preserve existing recovery on timeout, unavailable hints and expired sessions.
+- Aggregate recovery diagnostics without command data.
+
 ## 0.3.83
 
 - Deduplicate unchanged profile snapshots with a 60-second heartbeat.
