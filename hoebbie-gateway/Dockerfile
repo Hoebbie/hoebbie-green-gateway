@@ -17,6 +17,8 @@ COPY print-assets.mjs /app/print-assets.mjs
 COPY print-adapter.mjs /app/print-adapter.mjs
 COPY print-worker.mjs /app/print-worker.mjs
 COPY vacuum-adapter.mjs /app/vacuum-adapter.mjs
+COPY edge-observability.mjs /app/edge-observability.mjs
+COPY profile-status-report-policy.mjs /app/profile-status-report-policy.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs

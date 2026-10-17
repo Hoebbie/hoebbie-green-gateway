@@ -1,3 +1,5 @@
+import { createEdgeObservedFetch } from "./edge-observability.mjs";
+import { createProfileStatusReportPolicy } from "./profile-status-report-policy.mjs";
 import { createVacuumWorker } from './vacuum-adapter.mjs';
 import { createPrintWorker } from "./print-worker.mjs";
 import { isLightGroup } from "./light-group.mjs";
@@ -246,8 +248,10 @@ async function homeAssistantAreas() {
   }));
 }
 
+const edgeFetch = createEdgeObservedFetch("green");
+
 async function request(url, options) {
-  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(8_000) }).catch(() => null);
+  const response = await edgeFetch(url, { ...options, signal: AbortSignal.timeout(8_000) }).catch(() => null);
   if (!response) throw new Error("Die Verbindung ist nicht erreichbar.");
   return response;
 }
@@ -348,6 +352,8 @@ async function reportWasteCollection() {
   console.info(wasteCollectionSyncLog(collections.size));
 }
 
+const profileStatusReportPolicy = createProfileStatusReportPolicy();
+
 async function reportPersonalProfileStatus() {
   if (!profileStatusConfig) return;
   const response = await request(`${homeAssistantUrl}/api/states`, { headers: homeHeaders });
@@ -356,12 +362,15 @@ async function reportPersonalProfileStatus() {
   const appleStatus = personalProfileStatusFromStates(states, profileStatusConfig);
   const vehicleStatus = vehicleStatusFromStates(states, profileStatusConfig);
   if (!appleStatus) throw new Error("gateway.profile_status_projection_failed");
+  const payload = { appleStatus, mode: "profile_status", profileKey: profileStatusConfig.profileKey, ...(vehicleStatus ? { vehicleStatus } : {}) };
+  if (!profileStatusReportPolicy.shouldReport(payload)) return;
   const reported = await request(gatewayUrl, {
     method: "POST",
     headers: gatewayHeaders,
-    body: JSON.stringify({ appleStatus, mode: "profile_status", profileKey: profileStatusConfig.profileKey, ...(vehicleStatus ? { vehicleStatus } : {}) })
+    body: JSON.stringify(payload)
   });
   if (!reported.ok) throw new Error(await safeGatewayResponseFailure(reported, "gateway.profile_status_report_failed"));
+  profileStatusReportPolicy.confirm(payload);
   console.info("gateway.profile_status_reported");
 }
 
