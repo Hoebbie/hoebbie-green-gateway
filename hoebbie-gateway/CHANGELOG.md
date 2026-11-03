@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.88
+
+- Read Music Assistant API availability, existing-token acceptance and server version locally.
+- Extend the existing HA status report without exporting credentials, player or music data.
+- Keep missing, rejected and unsupported status distinct; no playback commands.
+
 ## 0.3.87
 
 - Report Core reachability and version through the existing authenticated gateway channel.

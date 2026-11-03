@@ -24,6 +24,7 @@ COPY queue-hints.mjs /app/queue-hints.mjs
 COPY music-report-policy.mjs /app/music-report-policy.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY read-ha-core.mjs /app/read-ha-core.mjs
+COPY read-music-health.mjs /app/read-music-health.mjs
 COPY core-health-reporter.mjs /app/core-health-reporter.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs
