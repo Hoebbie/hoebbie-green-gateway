@@ -1,3 +1,4 @@
+import { startCoreHealthReporter } from "./core-health-reporter.mjs";
 import { queueHints } from "./queue-hints.mjs";
 import { createMusicReportPolicy } from "./music-report-policy.mjs";
 import { GroupRecoveryProbe } from "./group-recovery-probe.mjs";
@@ -974,3 +975,5 @@ const wasteCollectionRefresh = setInterval(() => { void reportWasteCollection().
 wasteCollectionRefresh.unref?.();
 void connectRealtime();
 musicAssistantRealtime?.start();
+
+startCoreHealthReporter({token:homeAssistantToken,url:gatewayUrl,headers:gatewayHeaders});

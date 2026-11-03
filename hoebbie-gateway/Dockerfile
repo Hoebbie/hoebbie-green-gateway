@@ -23,6 +23,8 @@ COPY group-recovery-probe.mjs /app/group-recovery-probe.mjs
 COPY queue-hints.mjs /app/queue-hints.mjs
 COPY music-report-policy.mjs /app/music-report-policy.mjs
 COPY gateway.mjs /app/gateway.mjs
+COPY read-ha-core.mjs /app/read-ha-core.mjs
+COPY core-health-reporter.mjs /app/core-health-reporter.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs
 COPY music-assistant-client.mjs /app/music-assistant-client.mjs

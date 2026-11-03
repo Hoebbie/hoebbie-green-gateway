@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.87
+
+- Report Core reachability and version through the existing authenticated gateway channel.
+- Keep Supervisor credentials local; no device data, new listener or device commands.
+- Preserve the original measurement timestamp and report failed Core checks explicitly.
+
 ## 0.3.86
 
 - Skip unrelated empty command queues using authenticated read-only hints.
