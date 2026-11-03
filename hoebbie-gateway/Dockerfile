@@ -20,6 +20,8 @@ COPY vacuum-adapter.mjs /app/vacuum-adapter.mjs
 COPY edge-observability.mjs /app/edge-observability.mjs
 COPY profile-status-report-policy.mjs /app/profile-status-report-policy.mjs
 COPY group-recovery-probe.mjs /app/group-recovery-probe.mjs
+COPY queue-hints.mjs /app/queue-hints.mjs
+COPY music-report-policy.mjs /app/music-report-policy.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY light-group.mjs /app/light-group.mjs
 COPY gateway-response.mjs /app/gateway-response.mjs

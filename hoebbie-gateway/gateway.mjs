@@ -1,3 +1,5 @@
+import { queueHints } from "./queue-hints.mjs";
+import { createMusicReportPolicy } from "./music-report-policy.mjs";
 import { GroupRecoveryProbe } from "./group-recovery-probe.mjs";
 import { createEdgeObservedFetch } from "./edge-observability.mjs";
 import { createProfileStatusReportPolicy } from "./profile-status-report-policy.mjs";
@@ -111,15 +113,12 @@ async function reportMusicAssistantGroupCapabilities() {
 
 void reportMusicAssistantGroupCapabilities().catch((error) => console.error(error instanceof Error && typeof error.code === "string" ? error.code : "music_assistant.group_capability_failed"));
 
+const musicReportPolicy = createMusicReportPolicy();
+
 async function reportMusicAssistantDiscovery() {
   if (!musicAssistant) return;
   const players = await musicAssistant.listPlayers();
-  const reported = await request(gatewayUrl, {
-    method: "POST",
-    headers: gatewayHeaders,
-    body: JSON.stringify({
-      mode: "music_inventory",
-      players: players.map((player) => ({
+  const inventoryPlayers = players.map((player) => ({
         available: player.available,
         displayName: player.displayName,
         groupMembers: player.groupMembers,
@@ -128,13 +127,12 @@ async function reportMusicAssistantDiscovery() {
         powered: player.powered,
         syncedTo: player.syncedTo,
         ...(player.volume === null ? {} : { volume: player.volume })
-      }))
-    })
-  });
-  if (!reported.ok) {
-    const failure = await reported.json().catch(() => null);
-    const reason = typeof failure?.reason === "string" && /^[A-Za-z0-9_]{1,30}$/.test(failure.reason) ? `:${failure.reason}` : "";
-    throw new Error(`gateway.music_inventory_report_failed:${reported.status}${reason}`);
+      }));
+  if (musicReportPolicy.inventoryNeeded(inventoryPlayers)) {
+    const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders,
+      body: JSON.stringify({ mode: "music_inventory", players: inventoryPlayers }) });
+    if (!reported.ok) throw new Error(await safeGatewayResponseFailure(reported, "gateway.music_inventory_report_failed"));
+    musicReportPolicy.confirmInventory(inventoryPlayers);
   }
   const rejectedPlayerIds = [];
   for (let attempt = 0; attempt < Math.min(players.length, 8); attempt += 1) {
@@ -149,12 +147,15 @@ async function reportMusicAssistantDiscovery() {
     // identifier, URL or credential, only the three decision outcomes.
     console.info(`music_assistant.radio_icy_fallback:tracked=${activeRadioStream !== undefined},session_match=${activeRadioStream?.stationTitle === snapshot.title},metadata_available=${streamMetadata !== null}`);
     const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
-    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId }) });
+    const snapshotReport = { mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId };
+    if (!musicReportPolicy.snapshotNeeded(snapshot.sourcePlayerId, snapshotReport.snapshot)) break;
+    const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(snapshotReport) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
     const confirmation = await sessionReported.json().catch(() => null);
     if (!confirmation || !Number.isInteger(confirmation.updated) || confirmation.updated < 0) throw new Error("gateway.music_profile_snapshot_confirmation_invalid");
     if (streamMetadata) console.info(`music_assistant.radio_snapshot_update:updated=${confirmation.updated}`);
     if (confirmation.updated > 0) {
+      musicReportPolicy.confirmSnapshot(snapshot.sourcePlayerId, snapshotReport.snapshot);
       persistProfileQueueId(snapshot.sourcePlayerId);
       break;
     }
@@ -775,8 +776,9 @@ const musicGroupCommandDrain = new BoundedQueueDrain({
   onLimit: () => console.error("Der Music-Assistant-Gateway hat die Gruppen-Auftragsgrenze erreicht und wartet auf das nächste sichere Wecksignal.")
 });
 
-async function drainDeviceCommands() {
-  if (polling) return;
+let deviceDrainPending = false;
+async function drainDeviceCommands(hints = null) {
+  if (polling) { deviceDrainPending = true; return; }
   polling = true;
   let claimedCommands = 0;
   try {
@@ -784,7 +786,7 @@ async function drainDeviceCommands() {
     // serverseitig autorisierten Claims aus. Die Schleife leert begrenzt auch
     // mehrere dicht hintereinander eingereihte Aufträge.
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      const [pilotClaimed, routineClaimed, entityClaimed] = [await runOnce(), await runEntityRoutineBatch(), await runEntityOnce()];
+      const [pilotClaimed, routineClaimed, entityClaimed] = [hints?.pilot === false ? false : await runOnce(), hints?.entity === false ? false : await runEntityRoutineBatch(), hints?.entity === false ? false : await runEntityOnce()];
       if (!pilotClaimed && !routineClaimed && !entityClaimed) break;
       claimedCommands += Number(pilotClaimed) + Number(routineClaimed) + Number(entityClaimed);
     }
@@ -800,6 +802,7 @@ async function drainDeviceCommands() {
     console.error(error instanceof Error ? error.message : "Green-Gateway-Fehler");
   } finally {
     polling = false;
+    if (deviceDrainPending) { deviceDrainPending = false; void drainDeviceCommands(); }
     if (claimedCommands > 0) console.info(`gateway.command_claimed:${claimedCommands}`);
   }
 }
@@ -812,25 +815,28 @@ const printWorker = createPrintWorker({
   gatewayUrl, headers: gatewayHeaders, request
 });
 
-function drainCommands() {
-  void vacuumWorker.wake();
-  printWorker.wake();
+async function drainSelectedCommands() {
+  const hints = await queueHints(recoverySession);
+  if (hints?.vacuum !== false) void vacuumWorker.wake();
+  if (hints?.print !== false) printWorker.wake();
   // Music has its own bounded worker. It must never wait behind a slow light,
   // routine or inventory request and cannot keep those queues locked either.
-  void musicCommandDrain.request();
-  void musicVolumeCommandDrain.request();
-  void musicProfileTransferCommandDrain.request();
-  void musicProfileAllRoomsCommandDrain.request();
-  void musicProfileSeekCommandDrain.request();
-  void musicProfileSkipCommandDrain.request();
-  void musicProfileShuffleCommandDrain.request();
-  void musicCatalogCommandDrain.request();
-  void musicAlbumCatalogCommandDrain.request();
-  void musicDiscoveryCatalogCommandDrain.request();
-  void musicStartCommandDrain.request();
-  void musicGroupCommandDrain.request();
-  void drainDeviceCommands();
+  if (hints?.playback !== false) void musicCommandDrain.request();
+  if (hints?.volume !== false) void musicVolumeCommandDrain.request();
+  if (hints?.transfer !== false) void musicProfileTransferCommandDrain.request();
+  if (hints?.all_rooms !== false) void musicProfileAllRoomsCommandDrain.request();
+  if (hints?.seek !== false) void musicProfileSeekCommandDrain.request();
+  if (hints?.skip !== false) void musicProfileSkipCommandDrain.request();
+  if (hints?.shuffle !== false) void musicProfileShuffleCommandDrain.request();
+  if (hints?.catalog !== false) void musicCatalogCommandDrain.request();
+  if (hints?.catalog !== false) void musicAlbumCatalogCommandDrain.request();
+  if (hints?.catalog !== false) void musicDiscoveryCatalogCommandDrain.request();
+  if (hints?.start !== false) void musicStartCommandDrain.request();
+  if (hints?.group !== false) void musicGroupCommandDrain.request();
+  void drainDeviceCommands(hints);
 }
+const selectedCommandDrain = new CoalescedAsyncTask({ run: drainSelectedCommands, onError: () => console.error("gateway.queue_hint_drain_failed") });
+function drainCommands() { return selectedCommandDrain.request(); }
 
 async function realtimeSession() {
   const response = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify({ mode: "realtime_session" }) });
@@ -892,13 +898,14 @@ async function connectRealtime() {
       if (!message) return;
       if (isCommandReady(message, topic)) {
         console.info("gateway.realtime_command_ready");
+        musicReportPolicy.reset();
         void drainCommands();
       }
       // This signal contains no device data and only advances the next
       // read-only inventory report. It never enters a command path.
       if (isInventoryRefresh(message, topic)) {
         nextInventoryAt = Date.now();
-        void drainDeviceCommands();
+        void drainDeviceCommands({ pilot: false, entity: false });
       }
       if (Array.isArray(message) && message[2] === topic && message[3] === "phx_reply") {
         if (message[4]?.status === "ok") {
@@ -906,6 +913,7 @@ async function connectRealtime() {
           joinTimer = null;
           reconnectDelay = 5_000;
           console.info("gateway.realtime_joined");
+          musicReportPolicy.reset();
           heartbeatTimer = setInterval(() => socket.readyState === WebSocket.OPEN && socket.send(JSON.stringify(heartbeatMessage(++realtimeRef))), 20_000);
           const delay = Math.max(60_000, (session.expiresAt * 1_000) - Date.now() - 60_000);
           refreshTimer = setTimeout(() => socket.close(), delay);
@@ -951,9 +959,13 @@ setInterval(() => {
 // The broad pass remains a rare reconciliation for unrelated queues.
 setInterval(() => { void drainCommands(); }, 5 * 60_000);
 void drainCommands();
-// Match the Xiaomi Miot provider's 60-second state cadence. No device actions.
-const vacuumRefresh = setInterval(() => { void vacuumWorker.report().catch(() => console.error("vacuum.inventory_unavailable")); }, 60_000);
+// Idle vacuum refresh stays below the existing three-minute freshness limit.
+const vacuumRefresh = setInterval(() => { void vacuumWorker.report().catch(() => console.error("vacuum.inventory_unavailable")); }, 120_000);
 vacuumRefresh.unref?.();
+void vacuumWorker.report().catch(() => console.error("vacuum.inventory_unavailable"));
+// Keep availability fresh even when MA sends no events; policy skips duplicates.
+const musicHeartbeat = setInterval(() => { void musicDiscoveryReporter.request(); }, 60_000);
+musicHeartbeat.unref?.();
 void refreshPersonalProfileStatus();
 const profileStatusRefresh = setInterval(() => { void refreshPersonalProfileStatus(); }, PROFILE_STATUS_REFRESH_INTERVAL_MS);
 profileStatusRefresh.unref?.();

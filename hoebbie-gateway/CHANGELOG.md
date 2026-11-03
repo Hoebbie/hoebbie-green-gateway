@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.86
+
+- Skip unrelated empty command queues using authenticated read-only hints.
+- Avoid unchanged music reports while retaining live changes and heartbeats.
+- Reduce idle vacuum reporting; preserve immediate command feedback.
+
 ## 0.3.84
 
 - Avoid empty music-group Edge recovery calls with an authenticated read-only hint.

@@ -280,6 +280,7 @@ export function createVacuumWorker({
     }
     busy = true;
     again = false;
+    let processed = false;
     try {
       for (let count = 0; count < 20; count++) {
         const claimed = await cloud({ mode: "claim" });
@@ -292,6 +293,7 @@ export function createVacuumWorker({
           !vacuumId.test(command.entityId)
         )
           throw new Error("vacuum.invalid_command");
+        processed = true;
         const status = await run(command);
         const report = await cloud({
           mode: "report",
@@ -303,6 +305,9 @@ export function createVacuumWorker({
     } catch {
       log("vacuum.worker_unavailable");
     } finally {
+      if (processed) {
+        try { await reportInventory(await discover()); } catch { log("vacuum.inventory_unavailable"); }
+      }
       busy = false;
       if (again) queueMicrotask(() => void wake());
     }
