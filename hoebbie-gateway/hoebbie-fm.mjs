@@ -19,7 +19,7 @@ export class HoebbieFm {
     if (!this.enabled) throw new HoebbieFmError('hoebbie_fm.disabled');
     if (!['status','start','pause','resume','stop'].includes(action) || !/^[A-Za-z0-9:._/-]{1,200}$/.test(player)) throw new HoebbieFmError('hoebbie_fm.invalid_command');
     try {
-      const response = await this.fetcher(this.endpoint, { method:'POST',redirect:'error',signal:AbortSignal.timeout(action === 'start' ? 40_000 : 5_000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.token}`},body:JSON.stringify({action,player,...(commandId?{command_id:commandId}:{}),...(showProfile?{show_profile:showProfile}:{})}) });
+      const response = await this.fetcher(this.endpoint, { method:'POST',redirect:'error',signal:AbortSignal.timeout(action === 'start' ? 40_000 : action === 'resume' ? 30_000 : 5_000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.token}`},body:JSON.stringify({action,player,...(commandId?{command_id:commandId}:{}),...(showProfile?{show_profile:showProfile}:{})}) });
       if (!response.ok) throw new Error('rejected');
       const raw = await response.text(); if (raw.length > 4096) throw new Error('oversize');
       const data = JSON.parse(raw);

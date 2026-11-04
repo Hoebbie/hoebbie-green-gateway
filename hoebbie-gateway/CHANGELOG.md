@@ -1,3 +1,7 @@
+# 0.3.93
+
+- Allow confirmed FM stream reconnection after Music Assistant stops a long pause; keep status/pause/stop deadlines unchanged.
+
 ## 0.3.92
 
 - Optionaler Hoebbie-FM-Adapter mit bestätigtem Status und Pause/Fortsetzen/Stopp.
