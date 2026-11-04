@@ -1,3 +1,8 @@
+## 0.3.91
+
+- Preserve observed station identity in the outgoing profile report.
+- Report station changes immediately while retaining the existing payload allowlist.
+
 ## 0.3.90
 
 - Report external radio station identity independently of song metadata.

@@ -1,3 +1,14 @@
+// Explicit wire allowlist: never forward raw queue metadata or stream URLs.
+export function musicSnapshotReport(projectedSnapshot) {
+  const keys = ['album', 'artist', 'artworkRef', 'durationSeconds', 'isPlaying', 'nextTracks', 'observedAt', 'progressSeconds', 'sourceTime', 'title'];
+  const snapshot = Object.fromEntries(keys.map(key => [key, projectedSnapshot[key]]));
+  if (Object.hasOwn(projectedSnapshot, 'sourceMediaKind')) {
+    snapshot.sourceMediaKind = projectedSnapshot.sourceMediaKind;
+    snapshot.stationName = projectedSnapshot.stationName ?? null;
+  }
+  return { mode: 'music_profile_snapshot', snapshot, sourcePlayerId: projectedSnapshot.sourcePlayerId };
+}
+
 // Compare observable state; retain genuine timing changes and periodic liveness.
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);

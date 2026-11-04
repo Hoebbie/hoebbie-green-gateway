@@ -1,6 +1,6 @@
 import { startCoreHealthReporter } from "./core-health-reporter.mjs";
 import { queueHints } from "./queue-hints.mjs";
-import { createMusicReportPolicy } from "./music-report-policy.mjs";
+import { createMusicReportPolicy, musicSnapshotReport } from "./music-report-policy.mjs";
 import { GroupRecoveryProbe } from "./group-recovery-probe.mjs";
 import { createEdgeObservedFetch } from "./edge-observability.mjs";
 import { createProfileStatusReportPolicy } from "./profile-status-report-policy.mjs";
@@ -148,7 +148,7 @@ async function reportMusicAssistantDiscovery() {
     // identifier, URL or credential, only the three decision outcomes.
     console.info(`music_assistant.radio_icy_fallback:tracked=${activeRadioStream !== undefined},session_match=${activeRadioStream?.stationTitle === snapshot.title},metadata_available=${streamMetadata !== null}`);
     const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
-    const snapshotReport = { mode: "music_profile_snapshot", snapshot: { album: projectedSnapshot.album, artist: projectedSnapshot.artist, artworkRef: projectedSnapshot.artworkRef, durationSeconds: projectedSnapshot.durationSeconds, isPlaying: projectedSnapshot.isPlaying, nextTracks: projectedSnapshot.nextTracks, observedAt: projectedSnapshot.observedAt, progressSeconds: projectedSnapshot.progressSeconds, sourceTime: projectedSnapshot.sourceTime, title: projectedSnapshot.title }, sourcePlayerId: projectedSnapshot.sourcePlayerId };
+    const snapshotReport = musicSnapshotReport(projectedSnapshot);
     if (!musicReportPolicy.snapshotNeeded(snapshot.sourcePlayerId, snapshotReport.snapshot)) break;
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(snapshotReport) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
