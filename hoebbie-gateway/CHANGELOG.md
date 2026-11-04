@@ -1,3 +1,8 @@
+## 0.3.89
+
+- Übermittelt ausschließlich technische Updateangaben zu Core, OS, Supervisor, Green Gateway und Music Assistant über die bestehende Core-API und den bestehenden Gesundheitskanal.
+- Keine zusätzlichen Rechte oder Netzwerkfreigaben; keine Updateinstallation. Bisherige Gateway-/HA-/Musikfunktionen erhalten.
+
 # Changelog
 
 ## 0.3.88
