@@ -1,3 +1,8 @@
+## 0.3.90
+
+- Report external radio station identity independently of song metadata.
+- Preserve all status reporting and request reductions from 0.3.89.
+
 ## 0.3.89
 
 - Übermittelt ausschließlich technische Updateangaben zu Core, OS, Supervisor, Green Gateway und Music Assistant über die bestehende Core-API und den bestehenden Gesundheitskanal.

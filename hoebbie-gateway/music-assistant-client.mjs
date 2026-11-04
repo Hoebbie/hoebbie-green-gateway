@@ -464,6 +464,15 @@ export class MusicAssistantClient {
     const nextTracks = currentIndex === null ? [] : await this.nextQueueItems(sourcePlayerId, currentIndex);
     const liveMetadata = radioStreamMetadata(queue.stream_title);
     const snapshot = { album: liveMetadata ? null : text(current.album?.name ?? current.album), artist: liveMetadata?.artist ?? text(current.artists?.[0]?.name ?? current.artist?.name ?? current.artist), artworkRef, durationSeconds: seconds(current.duration), isPlaying, nextTracks, observedAt, progressSeconds: seconds(queue.elapsed_time), shuffleEnabled: typeof queue.shuffle_enabled === "boolean" ? queue.shuffle_enabled : null, sourcePlayerId, sourceTime: verifiedQueueSourceTime(queue.elapsed_time_last_updated, observedAt, isPlaying), title: liveMetadata?.title ?? text(current.name ?? current.title) };
+    // Source identity comes from the media item, never from changing ICY song text.
+    const media = current.media_item;
+    const mediaType = media?.media_type ?? current.media_type ?? current.streamdetails?.media_type;
+    if (typeof mediaType === "string" && mediaType !== "unknown") {
+      snapshot.sourceMediaKind = mediaType === "radio" ? "radio" : mediaType === "track" ? "track" : "other";
+      const stationName = text(media?.name ?? current.name);
+      snapshot.stationName = mediaType === "radio" && stationName && !stationName.includes("://")
+        ? stationName.slice(0, 80) : null;
+    }
     return includeQueueIndex ? { ...snapshot, queueIndex: currentIndex } : snapshot;
   }
 
