@@ -22,6 +22,7 @@ COPY profile-status-report-policy.mjs /app/profile-status-report-policy.mjs
 COPY group-recovery-probe.mjs /app/group-recovery-probe.mjs
 COPY queue-hints.mjs /app/queue-hints.mjs
 COPY music-report-policy.mjs /app/music-report-policy.mjs
+COPY hoebbie-fm.mjs /app/hoebbie-fm.mjs
 COPY gateway.mjs /app/gateway.mjs
 COPY read-ha-core.mjs /app/read-ha-core.mjs
 COPY read-ha-updates.mjs /app/read-ha-updates.mjs

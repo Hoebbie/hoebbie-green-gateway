@@ -34,7 +34,7 @@ export function validMusicCommand(command) {
     && typeof command.commandId === "string"
     && typeof command.playerId === "string"
     && playerId(command.playerId)
-    && (command.action === "pause" || command.action === "play"));
+    && (command.action === "pause" || command.action === "play" || command.action === "stop"));
 }
 
 export function validMusicVolumeCommand(command) {
@@ -761,7 +761,7 @@ export class MusicAssistantClient {
 
   async setPlayback(command) {
     if (!validMusicCommand(command)) throw new MusicAssistantGatewayError("music_assistant.invalid_command", "Der freigegebene Wiedergabeauftrag ist ungültig.");
-    const actionResult = await this.command(command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", { player_id: command.playerId });
+    const actionResult = await this.command(command.action === "stop" ? "player_queues/stop" : command.action === "pause" ? "players/cmd/pause" : "players/cmd/play", command.action === "stop" ? {queue_id:command.playerId} : { player_id: command.playerId });
     if (!actionResult.ok) throw new MusicAssistantGatewayError("music_assistant.command_failed", "Music Assistant hat den Wiedergabeauftrag nicht ausgeführt.");
     const expectedIsPlaying = command.action === "play";
     for (let attempt = 0; attempt < 5; attempt += 1) {

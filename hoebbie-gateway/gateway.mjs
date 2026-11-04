@@ -1,3 +1,4 @@
+import { HoebbieFm, isFmStationUri } from "./hoebbie-fm.mjs";
 import { startCoreHealthReporter } from "./core-health-reporter.mjs";
 import { queueHints } from "./queue-hints.mjs";
 import { createMusicReportPolicy, musicSnapshotReport } from "./music-report-policy.mjs";
@@ -114,6 +115,7 @@ async function reportMusicAssistantGroupCapabilities() {
 
 void reportMusicAssistantGroupCapabilities().catch((error) => console.error(error instanceof Error && typeof error.code === "string" ? error.code : "music_assistant.group_capability_failed"));
 
+const hoebbieFm = new HoebbieFm({baseUrl:process.env.HOEBBIE_FM_URL,token:process.env.HOEBBIE_FM_ACCESS_TOKEN});
 const musicReportPolicy = createMusicReportPolicy();
 
 async function reportMusicAssistantDiscovery() {
@@ -148,7 +150,7 @@ async function reportMusicAssistantDiscovery() {
     // identifier, URL or credential, only the three decision outcomes.
     console.info(`music_assistant.radio_icy_fallback:tracked=${activeRadioStream !== undefined},session_match=${activeRadioStream?.stationTitle === snapshot.title},metadata_available=${streamMetadata !== null}`);
     const projectedSnapshot = streamMetadata ? { ...snapshot, artist: streamMetadata.artist, title: streamMetadata.title } : snapshot;
-    const snapshotReport = musicSnapshotReport(projectedSnapshot);
+    const snapshotReport = musicSnapshotReport(await hoebbieFm.enrich(projectedSnapshot));
     if (!musicReportPolicy.snapshotNeeded(snapshot.sourcePlayerId, snapshotReport.snapshot)) break;
     const sessionReported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(snapshotReport) });
     if (!sessionReported.ok) throw new Error(await safeGatewayResponseFailure(sessionReported, "gateway.music_profile_snapshot_report_failed"));
@@ -501,7 +503,7 @@ async function runMusicOnce() {
     completion = {
       commandId: command.commandId,
       mode: "music_complete",
-      observedIsPlaying: await withinDeadline(musicAssistant.setPlayback(command), 7_000, "music_assistant.command_timeout"),
+      observedIsPlaying: await withinDeadline(hoebbieFm.setPlayback(command, musicAssistant), 17_000, "music_assistant.command_timeout"),
       success: true
     };
   } catch (error) {
@@ -514,6 +516,7 @@ async function runMusicOnce() {
   }
   const reported = await request(gatewayUrl, { method: "POST", headers: gatewayHeaders, body: JSON.stringify(completion) });
   if (!reported.ok) throw new Error("gateway.music_completion_failed");
+  if (completion.success) void musicDiscoveryReporter.request();
   return true;
 }
 
@@ -704,8 +707,8 @@ async function runMusicStartOnce() {
   if (!claimed.ok || !validMusicStartCommand(command)) throw new Error("gateway.music_profile_start_claim_invalid");
   let completion;
   try {
-    const snapshot = await withinDeadline(musicAssistant.startPlayback(command), command.mediaKind === "radio" ? 45_000 : 35_000, "music_assistant.start_timeout");
-    if (command.mediaKind === "radio") {
+    const snapshot = await withinDeadline((isFmStationUri(command.mediaUri) ? hoebbieFm.start(command, musicAssistant) : musicAssistant.startPlayback(command)), command.mediaKind === "radio" ? 45_000 : 35_000, "music_assistant.start_timeout");
+    if (command.mediaKind === "radio" && !isFmStationUri(command.mediaUri)) {
       const radioSession = { stationTitle: snapshot.title, streamUri: command.mediaUri };
       activeRadioStreams.set(command.targetPlayerId, radioSession);
       if (typeof snapshot.sourcePlayerId === "string") activeRadioStreams.set(snapshot.sourcePlayerId, radioSession);

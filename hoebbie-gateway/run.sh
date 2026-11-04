@@ -16,4 +16,7 @@ export PERSONAL_PROFILE_STATUS_ENTITIES_JSON="$(bashio::config 'personal_profile
 export PRINT_PILOT_ENABLED="$(bashio::config 'print_pilot_enabled')"
 export PRINT_PILOT_PRINTER_URI="$(bashio::config 'print_pilot_printer_uri')"
 
+export HOEBBIE_FM_URL="$(bashio::config 'hoebbie_fm_url')"
+export HOEBBIE_FM_ACCESS_TOKEN="$(bashio::config 'hoebbie_fm_access_token')"
+
 exec node /app/gateway.mjs

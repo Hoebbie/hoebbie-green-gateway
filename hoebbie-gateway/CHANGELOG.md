@@ -1,3 +1,9 @@
+## 0.3.92
+
+- Optionaler Hoebbie-FM-Adapter mit bestätigtem Status und Pause/Fortsetzen/Stopp.
+- Morgenroutine kann Moin mit Hoebbie wählen, ohne die Studio-Auswahl zu ändern.
+- Normale Radiosender bleiben unabhängig von der FM-Erreichbarkeit.
+
 ## 0.3.91
 
 - Preserve observed station identity in the outgoing profile report.
