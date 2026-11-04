@@ -503,7 +503,7 @@ async function runMusicOnce() {
     completion = {
       commandId: command.commandId,
       mode: "music_complete",
-      observedIsPlaying: await withinDeadline(hoebbieFm.setPlayback(command, musicAssistant), 17_000, "music_assistant.command_timeout"),
+      observedIsPlaying: await hoebbieFm.setPlayback(command, musicAssistant),
       success: true
     };
   } catch (error) {

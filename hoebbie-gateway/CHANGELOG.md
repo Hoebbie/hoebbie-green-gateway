@@ -1,3 +1,7 @@
+# 0.3.94
+
+- Keep the FM command deadline longer than its bounded pause/resume requests and physical confirmation; preserve the normal-radio deadline.
+
 # 0.3.93
 
 - Allow confirmed FM stream reconnection after Music Assistant stops a long pause; keep status/pause/stop deadlines unchanged.

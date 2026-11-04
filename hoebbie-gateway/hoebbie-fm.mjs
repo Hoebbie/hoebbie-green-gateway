@@ -1,3 +1,4 @@
+import { withinDeadline } from './queue-drain.mjs';
 // One configured peer, five fixed operations; credentials never enter OS payloads.
 export const FM_STATION_URI = 'hoebbie-fm://station/live';
 export const FM_MORNING_URI = 'hoebbie-fm://station/moin';
@@ -19,7 +20,7 @@ export class HoebbieFm {
     if (!this.enabled) throw new HoebbieFmError('hoebbie_fm.disabled');
     if (!['status','start','pause','resume','stop'].includes(action) || !/^[A-Za-z0-9:._/-]{1,200}$/.test(player)) throw new HoebbieFmError('hoebbie_fm.invalid_command');
     try {
-      const response = await this.fetcher(this.endpoint, { method:'POST',redirect:'error',signal:AbortSignal.timeout(action === 'start' ? 40_000 : action === 'resume' ? 30_000 : 5_000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.token}`},body:JSON.stringify({action,player,...(commandId?{command_id:commandId}:{}),...(showProfile?{show_profile:showProfile}:{})}) });
+      const response = await this.fetcher(this.endpoint, { method:'POST',redirect:'error',signal:AbortSignal.timeout(action === 'start' ? 40_000 : ['resume','pause'].includes(action) ? 30_000 : 5_000),headers:{'Content-Type':'application/json',Authorization:`Bearer ${this.token}`},body:JSON.stringify({action,player,...(commandId?{command_id:commandId}:{}),...(showProfile?{show_profile:showProfile}:{})}) });
       if (!response.ok) throw new Error('rejected');
       const raw = await response.text(); if (raw.length > 4096) throw new Error('oversize');
       const data = JSON.parse(raw);
@@ -48,8 +49,10 @@ export class HoebbieFm {
     return this.project(snapshot,result);
   }
   async setPlayback(command, music) {
-    const observed = await this.control(command, music);
-    return observed === null ? music.setPlayback(command) : observed;
+    // Include source lookup, bounded FM operation and physical confirmation.
+    // Normal radio retains its existing 17-second playback deadline.
+    const observed = await withinDeadline(this.control(command, music), 75_000, 'music_assistant.command_timeout');
+    return observed === null ? withinDeadline(music.setPlayback(command), 17_000, 'music_assistant.command_timeout') : observed;
   }
   async control(command, music) {
     if (!this.enabled) return null;
