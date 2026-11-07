@@ -1,3 +1,7 @@
+# 0.3.95
+
+- Support A4 monochrome PWG printers requiring 600 dpi while preserving 300 dpi printing and single-submission safeguards.
+
 # 0.3.94
 
 - Keep the FM command deadline longer than its bounded pause/resume requests and physical confirmation; preserve the normal-radio deadline.

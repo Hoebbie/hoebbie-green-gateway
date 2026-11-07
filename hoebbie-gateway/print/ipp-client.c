@@ -32,11 +32,13 @@ static void diagnostic(FILE *out,int failed){
 static void checkpoint(const char *next){phase=next;diagnostic(stderr,0);}
 static int die(void){diagnostic(stdout,1);return 1;}
 #include "asset-paths.h"
+#include "raster-600.h"
 int main(int argc,char **argv){
  clock_gettime(CLOCK_MONOTONIC,&started);
  if(argc!=5)return die();
  const char *op=argv[1],*uri=argv[2],*name=argv[3],*arg=argv[4];
- int submit=!strcmp(op,"submit"),status=!strcmp(op,"status"),cancel=!strcmp(op,"cancel"),check=!strcmp(op,"check");
+ int dpi600=!strcmp(op,"submit600");
+ int submit=!strcmp(op,"submit")||dpi600,status=!strcmp(op,"status"),cancel=!strcmp(op,"cancel"),check=!strcmp(op,"check");
  if(!(submit||status||cancel||check)||strlen(name)!=40||strncmp(name,"HOS-",4))return die();
  char scheme[16],user[128],host[256],resource[256];int port=0;
  if(httpSeparateURI(HTTP_URI_CODING_ALL,uri,scheme,sizeof(scheme),user,sizeof(user),host,sizeof(host),&port,resource,sizeof(resource))!=HTTP_URI_STATUS_OK||user[0])return die();
@@ -53,6 +55,10 @@ int main(int argc,char **argv){
   checkpoint("file");
   if(!allowed_print_path(arg) && !getenv("HOEBBIE_PRINT_SIMULATOR")){ippDelete(req);httpClose(http);return die();}
   int fd=open(arg,O_RDONLY|O_NOFOLLOW);file=fd<0?NULL:fdopen(fd,"rb");if(fd>=0&&!file)close(fd);if(!file||fstat(fileno(file),&st)||!S_ISREG(st.st_mode)||st.st_size<1800||st.st_size>12000000){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
+  if(dpi600){
+   FILE *converted=a4_raster_600(file);fclose(file);file=converted;
+   if(!file||fstat(fileno(file),&st)){if(file)fclose(file);ippDelete(req);httpClose(http);return die();}
+  }
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_NAME,"job-name",NULL,name);
   ippAddString(req,IPP_TAG_OPERATION,IPP_TAG_MIMETYPE,"document-format",NULL,"image/pwg-raster");
   ippAddBoolean(req,IPP_TAG_OPERATION,"ipp-attribute-fidelity",1);
@@ -60,7 +66,7 @@ int main(int argc,char **argv){
   ippAddString(req,IPP_TAG_JOB,IPP_TAG_KEYWORD,"sides",NULL,"one-sided");
   ippAddString(req,IPP_TAG_JOB,IPP_TAG_KEYWORD,"print-color-mode",NULL,"monochrome");
   ippAddInteger(req,IPP_TAG_JOB,IPP_TAG_INTEGER,"copies",1);
-  ippAddResolution(req,IPP_TAG_JOB,"printer-resolution",IPP_RES_PER_INCH,300,300);
+  ippAddResolution(req,IPP_TAG_JOB,"printer-resolution",IPP_RES_PER_INCH,dpi600?600:300,dpi600?600:300);
   length=(size_t)st.st_size;document_bytes=length;
  }else if(status||cancel){
   char *end=NULL;long id=strtol(arg,&end,10);
@@ -94,8 +100,8 @@ int main(int argc,char **argv){
   ipp_attribute_t *a=ippFindAttribute(r,"printer-is-accepting-jobs",IPP_TAG_BOOLEAN);
   int ok=a&&ippGetBoolean(a,0)&&contains(r,"document-format-supported",IPP_TAG_MIMETYPE,"image/pwg-raster")&&contains(r,"media-supported",IPP_TAG_KEYWORD,"iso_a4_210x297mm")&&contains(r,"print-color-mode-supported",IPP_TAG_KEYWORD,"monochrome")&&contains(r,"pwg-raster-document-type-supported",IPP_TAG_KEYWORD,"sgray_8");
   int dpi=0; a=ippFindAttribute(r,"pwg-raster-document-resolution-supported",IPP_TAG_RESOLUTION);
-  for(int i=0;a&&i<ippGetCount(a);i++){int y;ipp_res_t u;int x=ippGetResolution(a,i,&y,&u);if(x==300&&y==300&&u==IPP_RES_PER_INCH)dpi=1;}
-  printf("{\"ready\":%s}\n",ok&&dpi?"true":"false");
+  for(int i=0;a&&i<ippGetCount(a);i++){int y;ipp_res_t u;int x=ippGetResolution(a,i,&y,&u);if(u==IPP_RES_PER_INCH&&x==y){if(x==300)dpi=300;else if(x==600&&dpi!=300)dpi=600;}}
+  printf("{\"ready\":%s,\"resolution\":%d}\n",ok&&dpi?"true":"false",dpi);
  }else if(cancel){puts("{\"cancelAccepted\":true}");}
  else{
   int id=integer(r,"job-id",0),sheets=integer(r,"job-media-sheets-completed",-1);

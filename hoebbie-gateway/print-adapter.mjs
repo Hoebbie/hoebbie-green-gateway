@@ -44,7 +44,7 @@ export class PrintJournal {
 }
 function safePrintDiagnostic(value) {
   if (!value || !['validation', 'connect', 'file', 'request', 'document', 'response', 'identity'].includes(value.phase)) return null;
-  const bounds = { httpStatus: [-1, 999], ippStatus: [-1, 65535], bytesAttempted: [0, 12000000], documentBytes: [0, 12000000], elapsedMs: [0, 120000] };
+  const bounds = { httpStatus: [-1, 999], ippStatus: [-1, 65535], bytesAttempted: [0, 48000000], documentBytes: [0, 48000000], elapsedMs: [0, 120000] };
   const safe = { phase: value.phase };
   for (const [key, [min, max]] of Object.entries(bounds)) {
     if (!Number.isInteger(value[key]) || value[key] < min || value[key] > max) return null;
@@ -81,6 +81,7 @@ export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = 
     }
   }
   const generated = new Map();
+  let resolution = 300;
   return {
     target: createHash('sha256').update(uri).digest('hex'),
     async verifyAsset(asset = TEST_ASSET, metadata) {
@@ -96,13 +97,17 @@ export function cupsClient({ uri, binary = '/app/print/ipp-client', assetPath = 
       const bytes = await readFile(selected.path);
       if (createHash('sha256').update(bytes).digest('hex') !== selected.sha256) throw new Error('print.asset_invalid');
     },
-    check: name => invoke('check', name, '0'),
+    check: async name => {
+      const result = await invoke('check', name, '0');
+      resolution = result.resolution === 600 ? 600 : 300;
+      return result;
+    },
     submit: (name, asset = TEST_ASSET) => {
       if(isGeneratedAsset(asset)) {
         const file=generated.get(asset);if(!file || Date.parse(file.expiresAt)<=Date.now()) throw new Error('print.asset_expired');
-        return invoke('submit',name,file.path);
+        return invoke(resolution === 600 ? 'submit600' : 'submit',name,file.path);
       }
-      return invoke('submit',name,asset === TEST_ASSET ? assetPath : COLORING_ASSETS[asset].path);
+      return invoke(resolution === 600 ? 'submit600' : 'submit',name,asset === TEST_ASSET ? assetPath : COLORING_ASSETS[asset].path);
     },
     releaseAsset: async asset => { generated.delete(asset);await prepareAsset?.release?.(asset); },
     status: (name, id) => invoke('status', name, id),
