@@ -72,7 +72,7 @@ int main(int argc,char **argv){
   char *end=NULL;long id=strtol(arg,&end,10);
   if(!end||*end||id<1||id>2147483647L){ippDelete(req);httpClose(http);return die();}
   ippAddInteger(req,IPP_TAG_OPERATION,IPP_TAG_INTEGER,"job-id",(int)id);
-  if(status){const char *attrs[]={"job-id","job-name","job-state","job-state-reasons","job-media-sheets-completed"};ippAddStrings(req,IPP_TAG_OPERATION,IPP_TAG_KEYWORD,"requested-attributes",5,NULL,attrs);}
+  if(status){const char *attrs[]={"job-id","job-name","job-state","job-state-reasons","job-media-sheets-completed","job-impressions-completed","job-impressions","copies","sides"};ippAddStrings(req,IPP_TAG_OPERATION,IPP_TAG_KEYWORD,"requested-attributes",9,NULL,attrs);}
  }else{
   const char *attrs[]={"printer-is-accepting-jobs","document-format-supported","media-supported","print-color-mode-supported","pwg-raster-document-type-supported","pwg-raster-document-resolution-supported"};
   ippAddStrings(req,IPP_TAG_OPERATION,IPP_TAG_KEYWORD,"requested-attributes",6,NULL,attrs);
@@ -107,6 +107,14 @@ int main(int argc,char **argv){
   int id=integer(r,"job-id",0),sheets=integer(r,"job-media-sheets-completed",-1);
   ipp_attribute_t *a=ippFindAttribute(r,"job-state",IPP_TAG_ENUM);int state=a?ippGetInteger(a,0):0;
   if(status){phase="identity";a=ippFindAttribute(r,"job-name",IPP_TAG_NAME);const char *actual=a?ippGetString(a,0,NULL):NULL;if(!actual||strcmp(actual,name)){ippDelete(r);httpClose(http);return die();}}
+  /* RFC 8011 5.3.18.2: completed impressions include marked and stacked
+   * output. For exactly one successful simplex impression and one copy this
+   * is one sheet, even when a printer leaves its separate sheet counter at 0.
+   * Never infer completion from job-state alone or hide a positive conflict. */
+  if(status&&state==9&&(sheets==0||sheets==-1)&&
+     integer(r,"job-impressions-completed",-1)==1&&integer(r,"job-impressions",-1)==1&&
+     integer(r,"copies",-1)==1&&contains(r,"sides",IPP_TAG_KEYWORD,"one-sided")&&
+     contains(r,"job-state-reasons",IPP_TAG_KEYWORD,"job-completed-successfully"))sheets=1;
   printf("{\"jobId\":%d,\"state\":%d,\"sheets\":%d}\n",id,state,sheets);
  }
  ippDelete(r);httpClose(http);return 0;

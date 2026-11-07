@@ -1,3 +1,7 @@
+## 0.3.96
+
+- Confirm a single successfully completed simplex page using the IPP impression counter when a printer leaves its sheet counter at zero. Preserve uncertain and conflicting results.
+
 # 0.3.95
 
 - Support A4 monochrome PWG printers requiring 600 dpi while preserving 300 dpi printing and single-submission safeguards.
